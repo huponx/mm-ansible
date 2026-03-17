@@ -1,0 +1,24 @@
+---
+# ── Helm repo ─────────────────────────────────────────────────────────────────
+- name: Add Stakater Helm repo
+  ansible.builtin.shell: >
+    microk8s helm3 repo add {{ reloader_helm_repo_name }} {{ reloader_helm_repo_url }}
+  register: repo_add
+  changed_when: "'already exists' not in repo_add.stdout"
+  failed_when: repo_add.rc != 0 and 'already exists' not in repo_add.stdout
+
+- name: Update Helm repos
+  ansible.builtin.shell: microk8s helm3 repo update
+  changed_when: false
+
+# ── Install / upgrade Reloader ─────────────────────────────────────────────────
+- name: Install / upgrade Stakater Reloader via Helm
+  ansible.builtin.shell: >
+    microk8s helm3 upgrade --install {{ reloader_helm_release }}
+    {{ reloader_helm_repo_name }}/reloader
+    --namespace {{ reloader_namespace }}
+    --create-namespace
+    {% if reloader_chart_version %}--version {{ reloader_chart_version }}{% endif %}
+    --wait
+  register: reloader_install
+  changed_when: "'has been upgraded' in reloader_install.stdout or 'has been deployed' in reloader_install.stdout"

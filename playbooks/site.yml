@@ -3,5 +3,6 @@
   roles:
     - microk8s
     - argocd
+    - reloader
     # - vault
     # - postgres
