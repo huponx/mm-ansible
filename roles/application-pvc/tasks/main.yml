@@ -1,7 +1,8 @@
-- name: Ensure namespace exists
-  command: >
-    microk8s kubectl create namespace {{ pvc_namespace }}
-  ignore_errors: true
+- name: Ensure pvc namespace exists
+  ansible.builtin.shell: microk8s kubectl create namespace "{{ pvc_namespace }}"
+  register: ns_create
+  changed_when: ns_create.rc == 0 and "AlreadyExists" not in (ns_create.stderr | default(''))
+  failed_when: ns_create.rc != 0 and "AlreadyExists" not in (ns_create.stderr | default(''))
 
 - name: Render PVC manifest
   template:
