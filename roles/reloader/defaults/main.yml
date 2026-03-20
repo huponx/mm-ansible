@@ -1,0 +1,7 @@
+---
+# ── Stakater Reloader ──────────────────────────────────────────────────────────
+reloader_namespace: "reloader"
+reloader_chart_version: ""          # empty = latest
+reloader_helm_release: "reloader"
+reloader_helm_repo_name: "stakater"
+reloader_helm_repo_url: "https://stakater.github.io/stakater-charts"
