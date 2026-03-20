@@ -1,0 +1,6 @@
+pvc_name: application-pvc
+pvc_namespace: application
+pvc_access_modes:
+  - ReadWriteOnce
+pvc_storage: 1Gi
+pvc_storage_class: microk8s-hostpath
