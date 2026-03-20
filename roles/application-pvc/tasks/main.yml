@@ -1,0 +1,13 @@
+- name: Ensure namespace exists
+  command: >
+    microk8s kubectl create namespace {{ pvc_namespace }}
+  ignore_errors: true
+
+- name: Render PVC manifest
+  template:
+    src: pvc.yaml.j2
+    dest: /tmp/{{ pvc_name }}-pvc.yaml
+
+- name: Apply PVC
+  command: >
+    microk8s kubectl apply -f /tmp/{{ pvc_name }}-pvc.yaml
