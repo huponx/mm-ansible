@@ -1,0 +1,10 @@
+---
+# Default port Redis listens on
+redis_port: 6379
+
+# Default bind address — 0.0.0.0 allows connections from all interfaces
+redis_bind: "0.0.0.0"
+
+# Password is required when redis_require_password is true.
+# The actual secret lives in group_vars/all/redis_vault.yml (vault_redis_password).
+redis_require_password: true

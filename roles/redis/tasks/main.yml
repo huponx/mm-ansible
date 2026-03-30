@@ -1,0 +1,75 @@
+---
+# Refresh apt package index to ensure latest package versions are available
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# Install the Redis server package from the default Ubuntu apt repository
+- name: Install Redis
+  ansible.builtin.apt:
+    name: redis-server
+    state: latest
+  become: true
+
+# Ensure Redis starts on boot and is currently running
+- name: Start and enable Redis service
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+  become: true
+
+# Preserve the original configuration before making any changes
+- name: Backup original Redis configuration
+  ansible.builtin.copy:
+    src: /etc/redis/redis.conf
+    dest: /etc/redis/redis.conf.orig
+    remote_src: true
+    force: false
+  become: true
+
+# Set the port Redis listens on (default: 6379)
+- name: Configure Redis port
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?port\\s+"
+    line: "port {{ redis_port }}"
+    state: present
+  become: true
+  notify: Restart Redis
+
+# Set the bind address so Redis accepts connections on the specified interface
+- name: Configure Redis bind address
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?bind\\s+"
+    line: "bind {{ redis_bind }}"
+    state: present
+  become: true
+  notify: Restart Redis
+
+# Fail early if password auth is expected but vault_redis_password was not provided
+- name: Verify vault_redis_password is defined
+  ansible.builtin.assert:
+    that:
+      - vault_redis_password is defined
+      - vault_redis_password | length > 0
+    fail_msg: >
+      redis_require_password is true but vault_redis_password is not defined.
+      Add it to group_vars/all/redis_vault.yml and encrypt with ansible-vault.
+    quiet: true
+  when: redis_require_password
+
+# Set requirepass in redis.conf — secret sourced from vault_redis_password
+- name: Configure Redis password
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?requirepass\\s+"
+    line: "requirepass {{ vault_redis_password }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  no_log: true
+  when: redis_require_password

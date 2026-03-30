@@ -5,6 +5,7 @@
 | Role | Purpose |
 |---|---|
 | `install-postgres` | Install and configure PostgreSQL on Ubuntu via apt |
+| `redis` | Install and configure Redis on Ubuntu via apt |
 | `argocd` | Deploy ArgoCD to a Kubernetes cluster |
 | `microk8s` | Install and configure MicroK8s |
 | `vault` | Deploy HashiCorp Vault and External Secrets Operator |
@@ -80,6 +81,57 @@ vault_postgres_user_passwords:
 
 ---
 
+## redis
+
+### Role variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `redis_port` | `6379` | Port Redis listens on |
+| `redis_bind` | `"0.0.0.0"` | Interfaces Redis binds to |
+| `redis_require_password` | `true` | Set `requirepass` in `redis.conf` (requires `vault_redis_password`) |
+
+### Basic playbook usage
+
+```yaml
+- hosts: cache_servers
+  roles:
+    - role: redis
+```
+
+### Password (vault)
+
+When `redis_require_password: true` (the default), the role reads `vault_redis_password` from
+`inventories/production/group_vars/all/redis_vault.yml`.
+
+**`redis.yml`** (plaintext, committed):
+
+```yaml
+redis_port: 6379
+redis_bind: "0.0.0.0"
+redis_require_password: true
+```
+
+**`redis_vault.yml`** (encrypted with `ansible-vault`, committed):
+
+```yaml
+vault_redis_password: "your-strong-redis-password"
+```
+
+Encrypt the file before committing:
+
+```bash
+ansible-vault encrypt inventories/production/group_vars/all/redis_vault.yml
+```
+
+Edit it later:
+
+```bash
+ansible-vault edit inventories/production/group_vars/all/redis_vault.yml
+```
+
+---
+
 ## Ansible Vault — password management
 
 ### One-time setup
@@ -89,8 +141,9 @@ vault_postgres_user_passwords:
 echo 'your-strong-vault-passphrase' > .vault_pass
 chmod 600 .vault_pass
 
-# 2. Populate postgres_vault.yml with real passwords, then encrypt it
+# 2. Populate vault files with real secrets, then encrypt them
 ansible-vault encrypt inventories/production/group_vars/all/postgres_vault.yml
+ansible-vault encrypt inventories/production/group_vars/all/redis_vault.yml
 ```
 
 After encryption the file starts with:
@@ -139,4 +192,6 @@ it to `.vault_pass` at the start of the workflow:
 |---|---|---|
 | `postgres_vault.yml` | Yes, **encrypted** | `vault_postgres_user_passwords` |
 | `postgres.yml` | Yes, plaintext | `postgres_users` with `{{ vault_... }}` references |
+| `redis_vault.yml` | Yes, **encrypted** | `vault_redis_password` |
+| `redis.yml` | Yes, plaintext | `redis_port`, `redis_bind`, `redis_require_password` |
 | `.vault_pass` | **No** (`.gitignore`) | The vault passphrase |

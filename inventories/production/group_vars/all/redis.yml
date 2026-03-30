@@ -1,0 +1,5 @@
+# Redis configuration.
+# Password comes from redis_vault.yml (ansible-vault encrypted).
+redis_port: 6379
+redis_bind: "0.0.0.0"
+redis_require_password: true

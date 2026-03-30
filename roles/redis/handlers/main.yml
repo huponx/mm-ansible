@@ -1,0 +1,7 @@
+---
+# Triggered via `notify: Restart Redis` when configuration changes
+- name: Restart Redis
+  ansible.builtin.service:
+    name: redis-server
+    state: restarted
+  become: true
