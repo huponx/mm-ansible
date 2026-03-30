@@ -24,6 +24,11 @@ jobs:
         echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
         ssh-keyscan ${{ secrets.ANSIBLE_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Write vault password file
+      run: |
+        echo "${{ secrets.ANSIBLE_VAULT_PASS }}" > .vault_pass
+        chmod 600 .vault_pass
 
     - name: Run Ansible
       run: |

@@ -1,0 +1,117 @@
+---
+# Manages PostgreSQL users, databases, and privileges.
+#
+# Variable contract:
+#   postgres_users                 list – see defaults/main.yml for shape
+#   vault_postgres_user_passwords  dict – keyed by username, vault-encrypted,
+#                                  stored in group_vars/all/postgres_vault.yml
+#
+# Privilege mapping (priv field in postgres_users[].databases[]):
+#   ALL    → GRANT ALL on database  +  GRANT ALL on all tables in schema public
+#   SELECT → GRANT CONNECT on database  +  GRANT USAGE on schema  +  GRANT SELECT on tables
+#   (other table-level privs follow the same pattern as SELECT)
+#
+# Authentication: become_user: postgres — Unix socket peer authentication.
+# Requires the 'acl' package (installed by the prerequisites task).
+
+- name: Verify vault passwords are defined for all users
+  ansible.builtin.assert:
+    that:
+      - vault_postgres_user_passwords[item.name] is defined
+    fail_msg: >
+      Missing vault password for PostgreSQL user '{{ item.name }}'.
+      Add it to postgres_vault.yml: vault_postgres_user_passwords['{{ item.name }}']
+    quiet: true
+  loop: "{{ postgres_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create PostgreSQL users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ vault_postgres_user_passwords[item.name] }}"
+    state: present
+    no_password_changes: true
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: Create PostgreSQL databases
+  community.postgresql.postgresql_db:
+    name: "{{ item.1.name }}"
+    owner: "{{ item.0.name }}"
+    state: present
+    encoding: UTF8
+    lc_collate: en_US.UTF-8
+    lc_ctype: en_US.UTF-8
+    template: template0
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users | subelements('databases') }}"
+  loop_control:
+    label: "{{ item.0.name }}/{{ item.1.name }}"
+
+# --- Privilege grants ---
+# priv: ALL  →  single database-level ALL covers everything
+- name: Grant ALL privileges on database
+  community.postgresql.postgresql_privs:
+    database: "{{ item.1.name }}"
+    roles: "{{ item.0.name }}"
+    type: database
+    privs: ALL
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users | subelements('databases') }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1.name }} (ALL on database)"
+  when: item.1.priv == 'ALL'
+
+# priv: <table-level>  →  three grants: CONNECT on db, USAGE on schema, priv on tables
+- name: Grant CONNECT on database for restricted users
+  community.postgresql.postgresql_privs:
+    database: "{{ item.1.name }}"
+    roles: "{{ item.0.name }}"
+    type: database
+    privs: CONNECT
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users | subelements('databases') }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1.name }} (CONNECT)"
+  when: item.1.priv != 'ALL'
+
+- name: Grant USAGE on public schema for restricted users
+  community.postgresql.postgresql_privs:
+    database: "{{ item.1.name }}"
+    roles: "{{ item.0.name }}"
+    type: schema
+    objs: public
+    privs: USAGE
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users | subelements('databases') }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1.name }} (USAGE on schema)"
+  when: item.1.priv != 'ALL'
+
+- name: Grant table-level privileges on all tables in public schema
+  community.postgresql.postgresql_privs:
+    database: "{{ item.1.name }}"
+    roles: "{{ item.0.name }}"
+    type: table
+    objs: ALL_IN_SCHEMA
+    schema: public
+    privs: "{{ item.1.priv }}"
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_users | subelements('databases') }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1.name }} ({{ item.1.priv }} on tables)"
+  when: item.1.priv != 'ALL'

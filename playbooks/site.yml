@@ -5,5 +5,5 @@
     - argocd
     - reloader
     - application-pvc
+    - postgres
     # - vault
-    # - postgres

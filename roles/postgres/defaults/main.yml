@@ -1,0 +1,18 @@
+---
+postgres_version: "16"
+postgres_port: 5432
+postgres_listen_addresses: "*"
+
+postgres_pg_hba_path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+postgres_allowed_cidrs:
+  - "10.1.0.0/16"
+
+# postgres_users:
+#   - name: app_user          # must have a matching key in vault_postgres_user_passwords
+#     databases:
+#       - name: app_db
+#         priv: ALL           # ALL | SELECT | INSERT | UPDATE | DELETE | CONNECT
+#       - name: log_db
+#         priv: SELECT
+postgres_users: []
+
