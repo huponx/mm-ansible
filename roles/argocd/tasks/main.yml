@@ -4,3 +4,6 @@
 - name: Configure ArgoCD ingress (subpath and TLS at ingress)
   include_tasks: ingress.yml
   when: argocd_ingress_enabled | default(false) | bool
+
+- name: Fix argocd repo-server init container
+  include_tasks: patch-repo-server-init-container.yaml
