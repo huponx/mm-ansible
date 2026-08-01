@@ -12,8 +12,8 @@
   vars:
     argocd_cmd_params_patch:
       data:
-        # server.rootpath: "{{ argocd_path }}"
-        # server.basehref: "{{ argocd_path }}"
+        server.rootpath: "{{ argocd_path }}"
+        server.basehref: "{{ argocd_path }}"
         server.insecure: "true"
   register: cm_patch
   changed_when: cm_patch.rc == 0

@@ -4,9 +4,9 @@ metadata:
   name: argocd-server-ingress
   namespace: "{{ argocd_namespace }}"
   annotations:
-    {% if argocd_ingress_force_ssl_redirect | default(false) | bool %}
+  {% if argocd_ingress_force_ssl_redirect | default(false) | bool %}
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    {% endif %}
+  {% endif %}
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
 {% if argocd_ingress_use_cert_manager | default(false) | bool %}
     cert-manager.io/cluster-issuer: "{{ argocd_ingress_cluster_issuer }}"
