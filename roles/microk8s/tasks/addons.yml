@@ -46,6 +46,12 @@
   shell: microk8s enable hostpath-storage
   when: "'hostpath-storage' not in addons_enabled"
 
+# -------------------------
+# Enable Metrics Server
+# -------------------------
+- name: Enable Metrics Server
+  shell: microk8s enable metrics-server
+  when: "'metrics-server' not in addons_enabled"
 
 # -------------------------
 # Enable MetalLB
