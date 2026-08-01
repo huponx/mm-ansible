@@ -3,7 +3,7 @@
 argocd_ingress_enabled: true
 argocd_ingress_host: "argocd.momofamily.top"
 # argocd_version: "stable"
-argocd_path: "/argocd"
+argocd_path: "/"
 argocd_ingress_cluster_issuer: ""
 argocd_ingress_tls_secret: ""
 argocd_ingress_use_cert_manager: false
