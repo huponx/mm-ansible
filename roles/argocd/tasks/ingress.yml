@@ -20,14 +20,14 @@
   register: cm_patch
   changed_when: cm_patch.rc == 0
 
-- name: Set the public ArgoCD URL
-  ansible.builtin.shell: >
-    microk8s kubectl patch configmap argocd-cm
-    -n "{{ argocd_namespace }}"
-    --type merge
-    -p '{"data":{"url":"{{ argocd_external_url }}"}}'
-  register: cm_url_patch
-  changed_when: cm_url_patch.rc == 0
+# - name: Set the public ArgoCD URL
+#   ansible.builtin.shell: >
+#     microk8s kubectl patch configmap argocd-cm
+#     -n "{{ argocd_namespace }}"
+#     --type merge
+#     -p '{"data":{"url":"{{ argocd_external_url }}"}}'
+#   register: cm_url_patch
+#   changed_when: cm_url_patch.rc == 0
 
 - name: Restart ArgoCD server to apply subpath config
   ansible.builtin.shell: >
