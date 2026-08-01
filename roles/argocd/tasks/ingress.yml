@@ -14,6 +14,8 @@
       data:
         # server.rootpath: "{{ argocd_path }}"
         # server.basehref: "{{ argocd_path }}"
+        server.rootpath: ""
+        server.basehref: "/"
         server.insecure: "true"
   register: cm_patch
   changed_when: cm_patch.rc == 0
