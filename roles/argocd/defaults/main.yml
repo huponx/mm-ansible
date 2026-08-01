@@ -7,7 +7,9 @@ argocd_install_manifest_url: "https://raw.githubusercontent.com/argoproj/argo-cd
 # Ingress at subpath (e.g. https://host/argocd)
 argocd_ingress_enabled: true
 argocd_external_url: ""
-argocd_path: "/argocd"
+argocd_path: "/"
+argocd_server_rootpath: ""
+argocd_server_basehref: "/"
 argocd_ingress_host: ""
 argocd_ingress_class: "nginx"
 argocd_ingress_tls_secret: "argocd-server-tls"
