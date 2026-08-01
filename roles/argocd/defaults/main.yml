@@ -12,3 +12,4 @@ argocd_ingress_class: "nginx"
 argocd_ingress_tls_secret: "argocd-server-tls"
 argocd_ingress_use_cert_manager: true
 argocd_ingress_cluster_issuer: "letsencrypt-prod"
+argocd_ingress_force_ssl_redirect: true
