@@ -1,3 +1,4 @@
+
 ---
 - name: Install prerequisite packages
   ansible.builtin.apt:
@@ -11,17 +12,30 @@
     update_cache: true
   become: true
 
-- name: Add PostgreSQL APT signing key
-  ansible.builtin.apt_key:
+- name: Create APT keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Download PostgreSQL APT signing key
+  ansible.builtin.get_url:
     url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
-    state: present
+    dest: /etc/apt/keyrings/postgresql.asc
+    owner: root
+    group: root
+    mode: '0644'
   become: true
 
 - name: Add PostgreSQL APT repository
   ansible.builtin.apt_repository:
-    repo: "deb https://apt.postgresql.org/pub/repos/apt {{ ansible_facts['distribution_release'] }}-pgdg main"
+    repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt {{ ansible_facts['distribution_release'] }}-pgdg main"
     state: present
     filename: pgdg
+    update_cache: true
   become: true
 
 - name: Install PostgreSQL {{ postgres_version }}
