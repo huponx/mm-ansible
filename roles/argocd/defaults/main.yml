@@ -30,6 +30,11 @@ argocd_ingress_force_ssl_redirect: true
 #       state: absent             # removes the account and its password
 argocd_users: []
 
+# true = the vault is the only source of truth: a password changed in the ArgoCD UI is put back
+# to the vault value on the next run (which also signs that user out). false = only set the
+# password of an account that has none, or with rotate_password.
+argocd_enforce_passwords: true
+
 # RBAC (managed by this role when argocd_users is not empty: policy.csv is overwritten).
 argocd_rbac_default_policy: "role:readonly"
 # Extra lines for policy.csv, for example custom roles:
