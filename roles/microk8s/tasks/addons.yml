@@ -1,8 +1,9 @@
 ---
 # Enable the add-ons listed in microk8s_addons (see defaults/main.yml).
+# --wait-ready: right after the install MicroK8s needs a while to start.
 # Already enabled add-ons are skipped, and a failed readiness wait fails the run.
 - name: Get enabled addons
-  ansible.builtin.command: microk8s status --format yaml
+  ansible.builtin.command: microk8s status --wait-ready --timeout {{ microk8s_ready_timeout }} --format yaml
   register: microk8s_status
   changed_when: false
   # Read-only: run it in --check too. On a fresh host MicroK8s is not installed yet
