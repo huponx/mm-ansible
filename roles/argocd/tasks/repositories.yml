@@ -20,7 +20,11 @@
       - (argocd_repositories + argocd_repo_credentials) | map(attribute='auth', default='none') | difference(['none', 'token', 'ssh']) | length == 0
       - (argocd_repositories + argocd_repo_credentials) | map(attribute='type', default='git') | difference(['git', 'helm', 'oci']) | length == 0
       - (argocd_repositories + argocd_repo_credentials) | selectattr('type', 'defined') | selectattr('type', 'equalto', 'oci') | rejectattr('url', 'match', '^oci://') | list | length == 0
-      - argocd_repo_credentials | map(attribute='auth', default='none') | difference(['token', 'ssh']) | length == 0
+      # Credential templates need an auth, except the ones that are being removed (state: absent)
+      - >-
+        (argocd_repo_credentials | selectattr('state', 'undefined') | list
+         + argocd_repo_credentials | selectattr('state', 'defined') | rejectattr('state', 'equalto', 'absent') | list)
+        | map(attribute='auth', default='none') | difference(['token', 'ssh']) | length == 0
     fail_msg: >-
       Invalid argocd_repositories / argocd_repo_credentials / argocd_root_apps. Names use lowercase letters,
       digits and '-' and are unique per list; auth is none, token or ssh (credential templates: token or ssh); type is git, helm or oci (oci urls start with oci://).
