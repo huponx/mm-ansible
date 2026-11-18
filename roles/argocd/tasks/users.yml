@@ -1,0 +1,128 @@
+---
+# Local ArgoCD accounts (argocd_users). The built-in `admin` account is never touched.
+#
+# - accounts and apiKey capability: ConfigMap argocd-cm (accounts.<name>)
+# - roles: ConfigMap argocd-rbac-cm (policy.default and policy.csv, managed from argocd_users)
+# - passwords: bcrypt hash in Secret argocd-secret, from vault_argocd_user_passwords (ansible-vault).
+#   Set when the account has no password yet, or with `rotate_password: true`.
+
+- name: Split the ArgoCD users by state
+  ansible.builtin.set_fact:
+    argocd_users_present: "{{ argocd_users | rejectattr('state', 'defined') | list + argocd_users | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list }}"
+    argocd_users_absent: "{{ argocd_users | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list }}"
+
+- name: Validate the ArgoCD users
+  ansible.builtin.assert:
+    that:
+      - argocd_users | map(attribute='name') | select('match', '^[a-z][a-z0-9_-]*$') | list | length == argocd_users | length
+      - argocd_users | map(attribute='name') | unique | list | length == argocd_users | length
+      - "'admin' not in (argocd_users | map(attribute='name') | list)"
+      - argocd_users_present | map(attribute='name') | reject('in', (vault_argocd_user_passwords | default({})).keys() | list) | list | length == 0
+    fail_msg: >-
+      Invalid argocd_users. Names use lowercase letters, digits, '_' and '-', are unique and are not
+      'admin' (that account is not managed here). Every present user needs a key in
+      vault_argocd_user_passwords (group_vars/all/argocd_vault.yml, ansible-vault).
+    quiet: true
+
+- name: Configure the ArgoCD accounts
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - patch
+      - configmap
+      - argocd-cm
+      - -n
+      - "{{ argocd_namespace }}"
+      - --type=merge
+      - -p
+      - >-
+        {{ {'data': {('accounts.' ~ item.name): (
+        ('login, apiKey' if item.apikey | default(false) | bool else 'login')
+        if item.state | default('present') == 'present' else none)}} | to_json }}
+  loop: "{{ argocd_users }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.state | default('present') }})"
+  register: argocd_account_patch
+  changed_when: "'(no change)' not in argocd_account_patch.stdout"
+
+# Only the key names are kept, never the hashes.
+- name: Find the accounts that already have a password
+  ansible.builtin.command: microk8s kubectl get secret argocd-secret -n {{ argocd_namespace }} -o json
+  register: argocd_secret_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Remember which accounts have a password
+  ansible.builtin.set_fact:
+    argocd_password_keys: "{{ ((argocd_secret_raw.stdout | default('', true) or '{}') | from_json).data | default({}) | list }}"
+  no_log: true
+
+- name: Set the password of new accounts (or accounts with rotate_password)
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - patch
+      - secret
+      - argocd-secret
+      - -n
+      - "{{ argocd_namespace }}"
+      - --type=merge
+      - --patch-file=/dev/stdin
+    stdin: >-
+      {{ {'stringData': {
+      ('accounts.' ~ item.name ~ '.password'): (vault_argocd_user_passwords[item.name] | password_hash('bcrypt', ident='2b', rounds=10)),
+      ('accounts.' ~ item.name ~ '.passwordMtime'): (now(utc=True).strftime('%Y-%m-%dT%H:%M:%SZ'))}} | to_json }}
+  loop: "{{ argocd_users_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ('accounts.' ~ item.name ~ '.password') not in argocd_password_keys or item.rotate_password | default(false) | bool
+  changed_when: true
+  no_log: true
+
+- name: Remove the password of removed accounts
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - patch
+      - secret
+      - argocd-secret
+      - -n
+      - "{{ argocd_namespace }}"
+      - --type=merge
+      - -p
+      - "{{ {'data': {('accounts.' ~ item.name ~ '.password'): none, ('accounts.' ~ item.name ~ '.passwordMtime'): none}} | to_json }}"
+  loop: "{{ argocd_users_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ('accounts.' ~ item.name ~ '.password') in argocd_password_keys
+  changed_when: true
+
+- name: Build the RBAC policy lines
+  ansible.builtin.set_fact:
+    argocd_policy_lines: >-
+      {{ argocd_users_present | map(attribute='name') | zip(argocd_users_present | map(attribute='role', default='readonly'))
+         | map('join', ', role:') | map('regex_replace', '^', 'g, ') | list
+         + ([argocd_rbac_extra_policy | trim] if argocd_rbac_extra_policy | length > 0 else []) }}
+
+- name: Configure ArgoCD RBAC
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - patch
+      - configmap
+      - argocd-rbac-cm
+      - -n
+      - "{{ argocd_namespace }}"
+      - --type=merge
+      - -p
+      - "{{ {'data': {'policy.default': argocd_rbac_default_policy, 'policy.csv': (argocd_policy_lines | join(newline)) ~ newline}} | to_json }}"
+  vars:
+    newline: "\n"
+  register: argocd_rbac_patch
+  changed_when: "'(no change)' not in argocd_rbac_patch.stdout"

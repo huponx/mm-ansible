@@ -256,6 +256,7 @@ Which files are encrypted:
 |---|---|
 | `inventories/production/group_vars/all/postgres_vault.yml` | `vault_postgres_user_passwords` (one entry per user) |
 | `inventories/production/group_vars/all/redis_vault.yml` | `vault_redis_password` |
+| `inventories/production/group_vars/all/argocd_vault.yml` | `vault_argocd_user_passwords` (one entry per ArgoCD user, only when `argocd_users` is used) |
 
 Plain files only reference names, for example `postgres.yml` lists users, never passwords.
 Rule: anything called `*_vault.yml` is encrypted before commit.
@@ -400,6 +401,53 @@ PGPASSWORD=... psql -h SERVER -U reports-ro -d data -c 'select 1'
 PostgreSQL access from outside the host comes from `postgres_allowed_cidrs` (default `10.1.0.0/16`) with `postgres_auth_method: scram-sha-256`.
 If a password was stored as an md5 hash before, set `postgres_auth_method: md5` or rotate that password.
 
+### ArgoCD users
+
+The built-in `admin` account is not managed by Ansible (its first password is in the secret
+`argocd-initial-admin-secret`). Extra local accounts are listed in
+`inventories/production/group_vars/all/argocd.yml`:
+
+```yaml
+argocd_users:
+  - name: hung
+    role: admin          # admin | readonly | a role you define in argocd_rbac_extra_policy
+    apikey: false        # true lets the account create API tokens
+  - name: old-user
+    state: absent        # removes the account and its password
+```
+
+Roles you can give a user (the `role` field):
+
+| Role | Can do |
+|---|---|
+| `admin` | everything: manage applications, projects, repositories, clusters, settings |
+| `readonly` | view applications and projects, no changes (also the default for accounts without a role) |
+| your own | any role defined in `argocd_rbac_extra_policy`, for example `deployer` below |
+
+```yaml
+argocd_rbac_extra_policy: |
+  p, role:deployer, applications, get, */*, allow
+  p, role:deployer, applications, sync, */*, allow
+```
+
+With that, `role: deployer` on a user lets them view and sync applications but not edit or delete them.
+Policy syntax: [ArgoCD RBAC](https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/).
+
+Passwords go in `argocd_vault.yml` (create it, then encrypt):
+
+```bash
+cat > inventories/production/group_vars/all/argocd_vault.yml <<'EOF'
+vault_argocd_user_passwords:
+  hung: "a-long-random-password"
+EOF
+make vault-encrypt F=argocd_vault.yml
+make deploy TAGS=argocd
+```
+
+- A password is set when the account has none yet. To change it later, edit the vault file, set `rotate_password: true` on the user, deploy, then remove the flag.
+- `policy.csv` of `argocd-rbac-cm` is managed from `argocd_users` (`g, <user>, role:<role>` lines) plus `argocd_rbac_extra_policy`; manual edits to it are overwritten while `argocd_users` is not empty. `argocd_rbac_default_policy` (default `role:readonly`) applies to everyone else.
+- The `password_hash('bcrypt')` filter needs `passlib` and `bcrypt` on the machine that runs Ansible (in `requirements.txt`, so `make deps` installs them).
+
 ## Redis
 
 | Variable | Default | Description |
@@ -418,7 +466,7 @@ The role checks `redis-cli ping` at the end.
 | Role | Purpose | Main variables |
 |---|---|---|
 | `microk8s` | Install MicroK8s, enable the add-ons in `microk8s_addons`, cert-manager issuer | `microk8s_version`, `metallb_ip_range`, `microk8s_addons`, `acme_email`, `cluster_issuer_name` |
-| `argocd` | Install ArgoCD (pinned manifest) and its ingress | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
+| `argocd` | Install ArgoCD (pinned manifest), its ingress and optional local users (`argocd_users`) | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
 | `application-pvc` | PersistentVolumeClaim for applications | `pvc_name`, `pvc_namespace`, `pvc_storage`, `pvc_storage_class` |
 | `vault` | HashiCorp Vault and External Secrets Operator. Off unless `vault_enabled: true` | `vault_ingress_host`, `vault_dev_mode`, `eso_chart_version` |

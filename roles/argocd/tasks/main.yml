@@ -5,5 +5,9 @@
   include_tasks: ingress.yml
   when: argocd_ingress_enabled | default(false) | bool
 
+- name: Configure ArgoCD accounts and RBAC
+  include_tasks: users.yml
+  when: argocd_users | length > 0
+
 # - name: Fix argocd repo-server init container
 #   include_tasks: patch-repo-server-init-container.yaml
