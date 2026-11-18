@@ -1,14 +1,21 @@
+---
 - name: Ensure pvc namespace exists
-  ansible.builtin.shell: microk8s kubectl create namespace "{{ pvc_namespace }}"
-  register: ns_create
-  changed_when: ns_create.rc == 0 and "AlreadyExists" not in (ns_create.stderr | default(''))
-  failed_when: ns_create.rc != 0 and "AlreadyExists" not in (ns_create.stderr | default(''))
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    microk8s kubectl create namespace "{{ pvc_namespace }}" --dry-run=client -o yaml
+    | microk8s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  register: ns_apply
+  changed_when: "'created' in ns_apply.stdout"
 
 - name: Render PVC manifest
-  template:
+  ansible.builtin.template:
     src: pvc.yaml.j2
-    dest: /tmp/{{ pvc_name }}-pvc.yaml
+    dest: "/tmp/{{ pvc_name }}-pvc.yaml"
+    mode: "0644"
 
 - name: Apply PVC
-  command: >
-    microk8s kubectl apply -f /tmp/{{ pvc_name }}-pvc.yaml
+  ansible.builtin.command: "microk8s kubectl apply -f /tmp/{{ pvc_name }}-pvc.yaml"
+  register: pvc_apply
+  changed_when: "'unchanged' not in pvc_apply.stdout"

@@ -1,0 +1,17 @@
+---
+# Set to true (group_vars) to enable this role: playbooks/common.yml skips it otherwise.
+common_enabled: false
+
+common_unattended_upgrades: true
+common_fail2ban: true
+
+# UFW firewall. DANGER: make sure the SSH port is in the allow list before enabling.
+common_ufw_enabled: false
+common_ssh_port: "{{ ansible_port | default(22) }}"
+# Each rule: port, proto (default tcp), from (default any). Example:
+#   - { port: 5432, from: 10.1.0.0/16 }
+common_ufw_rules:
+  - { port: "{{ common_ssh_port }}" }
+  - { port: 80 }
+  - { port: 443 }
+common_ufw_default_incoming: deny

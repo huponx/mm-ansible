@@ -1,0 +1,86 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Ansible tags to run (comma separated, empty = everything). Example: postgres_users"
+        required: false
+        default: ""
+      limit:
+        description: "Limit to a host (empty = all)"
+        required: false
+        default: ""
+      check_only:
+        description: "Dry run only (--check --diff)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One deploy at a time; a running deploy is never cancelled halfway.
+concurrency:
+  group: ansible-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Add required reviewers to this environment in the repository settings.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: huponx/actions/.github/actions/ansible-setup@v1
+        with:
+          ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+          known-hosts: ${{ secrets.ANSIBLE_KNOWN_HOSTS }}
+          vault-password: ${{ secrets.ANSIBLE_VAULT_PASS }}
+          host: ${{ vars.ANSIBLE_HOST }}
+          user: ${{ vars.ANSIBLE_USER }}
+          port: ${{ vars.ANSIBLE_SSH_PORT || '22' }}
+
+      - name: Lint and syntax check
+        run: |
+          yamllint .
+          ansible-lint
+          ansible-playbook playbooks/site.yml --syntax-check
+
+      - name: Run Ansible
+        env:
+          TAGS: ${{ inputs.tags }}
+          LIMIT: ${{ inputs.limit }}
+          CHECK_ONLY: ${{ inputs.check_only }}
+        run: |
+          set -o pipefail
+          args=(playbooks/site.yml --diff)
+          [ -n "$TAGS" ] && args+=(--tags "$TAGS")
+          [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
+          [ "$CHECK_ONLY" = "true" ] && args+=(--check)
+          ansible-playbook "${args[@]}" 2>&1 | tee ansible.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deployment"
+            echo "- commit: \`${GITHUB_SHA::7}\`"
+            echo "- tags: \`${{ inputs.tags || 'all' }}\`"
+            echo ""
+            echo "### Ansible recap"
+            echo '```'
+            grep -A6 "PLAY RECAP" ansible.log || echo "No recap found"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove secrets
+        if: always()
+        run: |
+          [ -n "${SECRETS_DIR:-}" ] && rm -rf "$SECRETS_DIR" || true
+          rm -f ansible.log

@@ -1,11 +1,32 @@
-# Databases and their users.
-# Passwords come from postgres_vault.yml (ansible-vault encrypted).
+# PostgreSQL roles, users and databases. Passwords are NOT here: they live in
+# postgres_vault.yml (ansible-vault). See README, "PostgreSQL users and roles".
+#
+# Apply a change with: make deploy TAGS=postgres_users   (or push to main)
+
+# Group roles (NOLOGIN): grant privileges once, add users as members.
+# postgres_roles:
+#   - name: data_readonly
+#     databases:
+#       - { name: data, priv: SELECT }
+
 postgres_users:
-  - name: xdata-user-rw
+  - name: data-user-rw
     databases:
-      - name: xdata
+      - name: data
         priv: ALL
-  - name: xdata-user-ro
+  - name: data-user-ro
     databases:
-      - name: xdata
+      - name: data
         priv: SELECT
+
+# Remove a user: set `state: absent` (its objects are reassigned to postgres, the database stays).
+#   - name: old-user
+#     state: absent
+
+# Databases are created when a user references them; the first user in the list owns it.
+# To choose the owner explicitly:
+# postgres_databases:
+#   - { name: data, owner: data-user-rw }
+
+# report = list server roles that are not defined here; delete = drop them; off = ignore
+postgres_prune_unmanaged: report

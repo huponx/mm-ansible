@@ -8,3 +8,10 @@ redis_bind: "0.0.0.0"
 # Password is required when redis_require_password is true.
 # The actual secret lives in group_vars/all/redis_vault.yml (vault_redis_password).
 redis_require_password: true
+
+# Upgrade the redis-server package on every run (false = install once, keep the installed version)
+redis_upgrade: false
+
+# Memory limit, for example "256mb". Empty = Redis default (no limit).
+redis_maxmemory: ""
+redis_maxmemory_policy: "noeviction"

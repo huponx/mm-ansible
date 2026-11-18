@@ -1,10 +1,17 @@
-- hosts: all
-  become: yes
-  roles:
-    - microk8s
-    - argocd
-    - reloader
-    - application-pvc
-    - postgres
-    - redis
-    # - vault
+---
+# Everything. Use tags to run one component:
+#   --tags microk8s | argocd | reloader | pvc | vault | postgres | postgres_users | redis | common | backup
+- name: Preflight checks
+  ansible.builtin.import_playbook: preflight.yml
+
+- name: Common hardening and backups (optional)
+  ansible.builtin.import_playbook: common.yml
+
+- name: Cluster
+  ansible.builtin.import_playbook: cluster.yml
+
+- name: Database
+  ansible.builtin.import_playbook: database.yml
+
+- name: Cache
+  ansible.builtin.import_playbook: cache.yml

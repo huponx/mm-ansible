@@ -1,0 +1,57 @@
+---
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+    cache_valid_time: 3600
+  when: common_unattended_upgrades | bool
+
+- name: Enable automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_unattended_upgrades | bool
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    cache_valid_time: 3600
+  when: common_fail2ban | bool
+
+- name: Enable fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: common_fail2ban | bool
+
+- name: Configure the UFW firewall
+  when: common_ufw_enabled | bool
+  block:
+    - name: Install ufw
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+        cache_valid_time: 3600
+
+    - name: Allow configured ports (before enabling, so SSH is never cut)
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port | string }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        from_ip: "{{ item.from | default('any') }}"
+      loop: "{{ common_ufw_rules }}"
+      loop_control:
+        label: "{{ item.port }} from {{ item.from | default('any') }}"
+
+    - name: Enable ufw with the default incoming policy
+      community.general.ufw:
+        state: enabled
+        policy: "{{ common_ufw_default_incoming }}"
+        direction: incoming

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Managed by Ansible. Dumps PostgreSQL and copies the Redis RDB file into {{ backup_dir }}.
+set -euo pipefail
+umask 077
+stamp=$(date +%Y%m%d-%H%M%S)
+dir="{{ backup_dir }}"
+{% if backup_postgres %}
+sudo -u postgres pg_dumpall --globals-only | gzip > "$dir/postgres-globals-$stamp.sql.gz"
+for db in $(sudo -u postgres psql -Atc "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres'"); do
+  sudo -u postgres pg_dump --format=custom "$db" > "$dir/postgres-$db-$stamp.dump"
+done
+{% endif %}
+{% if backup_redis %}
+{% if redis_require_password | default(false) | bool %}
+export REDISCLI_AUTH="$(awk '/^requirepass /{print $2}' /etc/redis/redis.conf)"
+{% endif %}
+redis-cli -p {{ redis_port | default(6379) }} SAVE >/dev/null
+cp /var/lib/redis/dump.rdb "$dir/redis-$stamp.rdb"
+{% endif %}
+find "$dir" -type f -mtime +{{ backup_keep_days }} -delete

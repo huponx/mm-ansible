@@ -1,0 +1,7 @@
+---
+- name: Cache
+  hosts: all
+  become: true
+  roles:
+    - role: redis
+      tags: [redis, cache]

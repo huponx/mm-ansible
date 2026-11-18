@@ -1,7 +1,11 @@
+---
 - name: Create cluster issuer yaml from template
-  template:
+  ansible.builtin.template:
     src: cluster-issuer.yaml.j2
     dest: /tmp/cluster-issuer.yaml
+    mode: "0644"
 
 - name: Apply cluster issuer
-  shell: microk8s kubectl apply -f /tmp/cluster-issuer.yaml
+  ansible.builtin.command: microk8s kubectl apply -f /tmp/cluster-issuer.yaml
+  register: cluster_issuer_apply
+  changed_when: "'unchanged' not in cluster_issuer_apply.stdout"

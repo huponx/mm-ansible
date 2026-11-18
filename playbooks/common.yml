@@ -1,0 +1,14 @@
+---
+# Optional host hardening and backups. Both are off until enabled in group_vars:
+#   common_enabled: true
+#   backup_enabled: true
+- name: Common
+  hosts: all
+  become: true
+  roles:
+    - role: common
+      when: common_enabled | default(false) | bool
+      tags: [common]
+    - role: backup
+      when: backup_enabled | default(false) | bool
+      tags: [backup]
