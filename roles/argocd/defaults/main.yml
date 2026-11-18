@@ -41,3 +41,32 @@ argocd_rbac_default_policy: "role:readonly"
 #   argocd_rbac_extra_policy: |
 #     p, role:deployer, applications, sync, */*, allow
 argocd_rbac_extra_policy: ""
+
+# ── Repositories ──────────────────────────────────────────────────────────────
+# Credentials: vault_argocd_repo_secrets in group_vars/all/argocd_vault.yml, keyed by name:
+#   token: { username: ..., password: ... }      ssh: { ssh_private_key: | ... }
+# One repository (auth: none for a public repository, nothing to put in the vault):
+#   argocd_repositories:
+#     - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token }
+#     # secret: <vault key> shares one vault entry between several repositories (default: name)
+#     - { name: charts, url: "https://github.com/huponx/charts.git" }
+#     - { name: old, url: "https://example.com/old.git", state: absent }
+argocd_repositories: []
+
+# One credential for every repository whose URL starts with `url` (no per-repository secret needed):
+#   argocd_repo_credentials:
+#     - { name: huponx, url: "https://github.com/huponx", auth: token }
+argocd_repo_credentials: []
+
+# Application that points at a directory of Application manifests (app of apps):
+#   argocd_root_apps:
+#     - name: root-production
+#       repo_url: "https://github.com/huponx/mm-deploy.git"
+#       path: applications/production
+#       revision: main          # default
+#       recurse: false          # also read sub-directories
+#       automated: true         # sync by itself (default)
+#       prune: false            # delete what is removed from git (default false)
+#       self_heal: true         # undo manual changes (default)
+#       cascade_delete: true    # finalizer: deleting it also deletes its child Applications (default)
+argocd_root_apps: []

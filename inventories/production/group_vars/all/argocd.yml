@@ -20,3 +20,29 @@ argocd_ingress_force_ssl_redirect: false
 argocd_users:
   - name: huponx
     role: admin
+
+# Repositories, shared credentials and root applications. Credentials: argocd_vault.yml
+# (vault_argocd_repo_secrets). See README, "ArgoCD repositories and root applications".
+# argocd_repositories:
+#   - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token }
+# argocd_root_apps:
+#   - { name: root-production, repo_url: "https://github.com/huponx/mm-deploy.git", path: applications/production }
+argocd_repositories:
+  - name: mm-deploy
+    url: https://github.com/huponx/mm-deploy.git
+    auth: token
+  - name: charts
+    url: https://github.com/huponx/charts.git
+    auth: token
+argocd_repo_credentials:
+  - name: huponx
+    url: https://github.com/huponx
+    auth: token
+argocd_root_apps:
+  - name: root-production
+    repo_url: https://github.com/huponx/mm-deploy.git
+    path: applications/production
+    recurse: false               # also read sub-directories
+    automated: true              # sync by itself (default)
+    prune: true                 # delete what is removed from git (default false)
+    cascade_delete: true         # finalizer: deleting the root deletes its children

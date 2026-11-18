@@ -1,0 +1,159 @@
+---
+# Git/Helm repositories, repository credential templates and root Applications, all declarative.
+#
+# - argocd_repositories: Secret `repo-<name>` (label secret-type=repository), one per repository
+# - argocd_repo_credentials: Secret `creds-<name>` (label secret-type=repo-creds), shared by every
+#   repository whose URL starts with the given prefix
+# - argocd_root_apps: an Application that points at a directory of Application manifests (app of apps)
+#
+# Credentials come from vault_argocd_repo_secrets (ansible-vault), keyed by the item name:
+#   token: { username: ..., password: ... }      ssh: { ssh_private_key: ... }
+# Secrets are applied with server-side apply (no last-applied annotation holding the secret) and
+# sent on stdin, never on the command line.
+
+- name: Validate the ArgoCD repositories
+  ansible.builtin.assert:
+    that:
+      - (argocd_repositories + argocd_repo_credentials + argocd_root_apps) | map(attribute='name') | select('match', '^[a-z0-9][a-z0-9-]*$') | list | length == (argocd_repositories + argocd_repo_credentials + argocd_root_apps) | length
+      - (argocd_repositories | map(attribute='name') | list | unique | length) == argocd_repositories | length
+      - (argocd_repo_credentials | map(attribute='name') | list | unique | length) == argocd_repo_credentials | length
+      - (argocd_repositories + argocd_repo_credentials) | map(attribute='auth', default='none') | difference(['none', 'token', 'ssh']) | length == 0
+      - argocd_repo_credentials | map(attribute='auth', default='none') | difference(['token', 'ssh']) | length == 0
+    fail_msg: >-
+      Invalid argocd_repositories / argocd_repo_credentials / argocd_root_apps. Names use lowercase letters,
+      digits and '-' and are unique per list; auth is none, token or ssh (credential templates: token or ssh).
+    quiet: true
+
+- name: Check the repository credentials exist in the vault
+  ansible.builtin.assert:
+    that:
+      - (item.secret | default(item.name)) in (vault_argocd_repo_secrets | default({}))
+      - >-
+        (item.auth == 'token' and (vault_argocd_repo_secrets[item.secret | default(item.name)].username | default('') | length > 0)
+         and (vault_argocd_repo_secrets[item.secret | default(item.name)].password | default('') | length > 0))
+        or (item.auth == 'ssh' and (vault_argocd_repo_secrets[item.secret | default(item.name)].ssh_private_key | default('') | length > 0))
+    fail_msg: >-
+      {{ item.name }} uses auth {{ item.auth }}: add {{ item.secret | default(item.name) }} to vault_argocd_repo_secrets in argocd_vault.yml
+      (token: username and password, ssh: ssh_private_key).
+    quiet: true
+  loop: "{{ argocd_repositories + argocd_repo_credentials }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.auth | default('none') != 'none' and item.state | default('present') != 'absent'
+  no_log: true
+
+# Only the resource versions are kept, to tell whether an apply changed anything.
+- name: Read the existing repository secrets
+  ansible.builtin.command: >-
+    microk8s kubectl get secret -n {{ argocd_namespace }}
+    -l 'argocd.argoproj.io/secret-type in (repository,repo-creds)' -o json
+  register: argocd_repo_secrets_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Remember their resource versions
+  ansible.builtin.set_fact:
+    argocd_repo_versions: >-
+      {{ ((argocd_repo_secrets_raw.stdout | default('', true) or '{"items": []}') | from_json)['items'] | default([])
+         | map(attribute='metadata') | items2dict(key_name='name', value_name='resourceVersion') }}
+  no_log: true
+
+- name: Build the repository secrets
+  ansible.builtin.set_fact:
+    argocd_repo_secret_list: >-
+      {%- set out = [] -%}
+      {%- for kind, items, prefix in [('repository', argocd_repositories, 'repo-'), ('repo-creds', argocd_repo_credentials, 'creds-')] -%}
+      {%- for r in items -%}
+      {%- set auth = r.auth | default('none') -%}
+      {%- set data = {'url': r.url} -%}
+      {%- if kind == 'repository' -%}
+      {%- set _ = data.update({'type': r.type | default('git'), 'name': r.name}) -%}
+      {%- endif -%}
+      {%- if r.state | default('present') == 'present' and auth == 'token' -%}
+      {%- set _ = data.update({'username': vault_argocd_repo_secrets[r.secret | default(r.name)].username, 'password': vault_argocd_repo_secrets[r.secret | default(r.name)].password}) -%}
+      {%- elif r.state | default('present') == 'present' and auth == 'ssh' -%}
+      {%- set _ = data.update({'sshPrivateKey': vault_argocd_repo_secrets[r.secret | default(r.name)].ssh_private_key}) -%}
+      {%- endif -%}
+      {%- set _ = out.append({'secret': prefix ~ r.name, 'state': r.state | default('present'), 'manifest': {
+            'apiVersion': 'v1', 'kind': 'Secret',
+            'metadata': {'name': prefix ~ r.name, 'namespace': argocd_namespace, 'labels': {'argocd.argoproj.io/secret-type': kind}},
+            'type': 'Opaque', 'stringData': data}}) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out | to_json }}
+  no_log: true
+
+- name: Decode the repository secrets
+  ansible.builtin.set_fact:
+    argocd_repo_secret_list: "{{ argocd_repo_secret_list | from_json }}"
+  no_log: true
+
+- name: Apply the repository secrets
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - apply
+      - --server-side
+      - --force-conflicts
+      - -f
+      - "-"
+      - -o
+      - "jsonpath={.metadata.resourceVersion}"
+    stdin: "{{ item.manifest | to_json }}"
+  loop: "{{ argocd_repo_secret_list | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    label: "{{ item.secret }}"
+  register: argocd_repo_apply
+  changed_when: argocd_repo_apply.stdout | default('') != (argocd_repo_versions[item.secret] | default(''))
+  no_log: true
+
+- name: Remove the repository secrets marked absent
+  ansible.builtin.command: >-
+    microk8s kubectl delete secret {{ item.secret }} -n {{ argocd_namespace }} --ignore-not-found
+  loop: "{{ argocd_repo_secret_list | selectattr('state', 'equalto', 'absent') | list }}"
+  loop_control:
+    label: "{{ item.secret }}"
+  register: argocd_repo_delete
+  changed_when: "'deleted' in argocd_repo_delete.stdout"
+
+- name: Apply the root applications
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - apply
+      - -f
+      - "-"
+    stdin: >-
+      {{ {
+        'apiVersion': 'argoproj.io/v1alpha1', 'kind': 'Application',
+        'metadata': dict({'name': item.name, 'namespace': argocd_namespace},
+          **({'finalizers': ['resources-finalizer.argocd.argoproj.io']} if item.cascade_delete | default(true) | bool else {})),
+        'spec': {
+          'project': item.project | default('default'),
+          'source': {
+            'repoURL': item.repo_url, 'targetRevision': item.revision | default('main'), 'path': item.path,
+            'directory': {'recurse': item.recurse | default(false) | bool}},
+          'destination': {'server': 'https://kubernetes.default.svc', 'namespace': item.dest_namespace | default(argocd_namespace)},
+          'syncPolicy': ({'automated': {'prune': item.prune | default(false) | bool, 'selfHeal': item.self_heal | default(true) | bool}}
+                         if item.automated | default(true) | bool else {})}} | to_json }}
+  loop: "{{ argocd_root_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.state | default('present') != 'absent'
+  register: argocd_root_apply
+  changed_when: "'unchanged' not in argocd_root_apply.stdout"
+
+# With the finalizer (cascade_delete, default true) deleting the Application also deletes what it created.
+- name: Remove the root applications marked absent
+  ansible.builtin.command: >-
+    microk8s kubectl delete application {{ item.name }} -n {{ argocd_namespace }} --ignore-not-found
+  loop: "{{ argocd_root_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.state | default('present') == 'absent'
+  register: argocd_root_delete
+  changed_when: "'deleted' in argocd_root_delete.stdout"
