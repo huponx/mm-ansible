@@ -642,6 +642,8 @@ Permissions the PAT needs (ArgoCD only clones and fetches, so read-only is enoug
   environment, and put the owner and purpose in its description. The vault key can use the same name
   (`secret: argocd-prod-readonly`).
 
+The root `infra-production` applies the plain manifests of mm-deploy `infra-services/production/` (namespace `infrastructure`, the ExternalName Services for PostgreSQL and Redis, the `gatekeeper-routes` ConfigMap of the environment). Each environment is its own directory (`infra-services/<env>/`) and its own cluster; the root uses `prune: false`. Needs `make deploy TAGS=argocd`.
+
 What `prune`, `recurse` and `cascade_delete` do on a root application:
 
 | Field | Default | Meaning |
@@ -650,6 +652,8 @@ What `prune`, `recurse` and `cascade_delete` do on a root application:
 | `prune` | `false` | With `true`, a manifest removed from git is deleted from the cluster; with `false` it only shows as OutOfSync |
 | `self_heal` | `true` | Undoes manual changes made in the cluster |
 | `recurse` | `false` | With `true`, sub-directories of `path` are read too (every YAML file in them is applied) |
+| `include`, `exclude` | unset | Glob (relative to `path`) of the files read or skipped, for example `"{namespace.yaml,redis/*.yaml}"` |
+| `dest_namespace` | `argocd` | Namespace for manifests that do not set one |
 | `cascade_delete` | `true` | Finalizer: deleting the root also deletes its child Applications |
 
 - Secrets are applied with server-side apply and sent on stdin, so the secret is not left in a `last-applied` annotation or in the process list.
