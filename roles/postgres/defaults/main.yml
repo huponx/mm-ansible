@@ -36,7 +36,7 @@ postgres_roles: []
 #       attrs:                    # optional
 #         connection_limit: 20
 #         valid_until: "2027-01-01"
-#         role_attr_flags: ""     # for example CREATEDB
+#         role_attr_flags: ""     # comma separated, for example CREATEDB,CREATEROLE
 #       databases:
 #         - { name: app_db, priv: ALL }     # ALL | SELECT | INSERT | UPDATE | DELETE (comma separated)
 postgres_users: []

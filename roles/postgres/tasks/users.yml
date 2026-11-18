@@ -111,7 +111,8 @@
     name: "{{ item.name }}"
     password: "{{ vault_postgres_user_passwords[item.name] }}"
     no_password_changes: "{{ not (postgres_rotate_passwords | bool or item.rotate_password | default(false) | bool) }}"
-    role_attr_flags: "LOGIN {{ item.attrs.role_attr_flags | default('') }}"
+    role_attr_flags: >-
+      {{ (['LOGIN'] + (item.attrs.role_attr_flags | default('') | split(',') | map('trim') | select | list)) | join(',') }}
     conn_limit: "{{ item.attrs.connection_limit | default(omit) }}"
     expires: "{{ item.attrs.valid_until | default(omit) }}"
     state: present
@@ -169,19 +170,48 @@
     label: "{{ item.name }}"
   when: not postgres_allow_drop_databases | bool
 
+# ── Dry run support ───────────────────────────────────────────────────────────
+# In --check the roles and databases above are only simulated. GRANT/REVOKE need the real
+# role and database, so only the grants whose role and database already exist are simulated.
+- name: List the roles and databases that exist now (dry run only)
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: "SELECT 'role' AS kind, rolname AS name FROM pg_roles UNION ALL SELECT 'db', datname FROM pg_database"
+  become: true
+  become_user: postgres
+  register: pg_existing
+  changed_when: false
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Work out the grants that can be simulated
+  ansible.builtin.set_fact:
+    pg_existing_roles: "{{ pg_existing.query_result | default([]) | selectattr('kind', 'equalto', 'role') | map(attribute='name') | list }}"
+    pg_existing_dbs: "{{ pg_existing.query_result | default([]) | selectattr('kind', 'equalto', 'db') | map(attribute='name') | list }}"
+
+- name: Select the grants and default privileges to apply
+  ansible.builtin.set_fact:
+    pg_grants_effective: >-
+      {{ pg_grants if not ansible_check_mode
+         else pg_grants | selectattr('role', 'in', pg_existing_roles) | selectattr('db', 'in', pg_existing_dbs) | list }}
+    pg_default_priv_pairs_effective: >-
+      {{ pg_default_priv_pairs if not ansible_check_mode
+         else pg_default_priv_pairs | selectattr('0.role', 'in', pg_existing_roles) | selectattr('0.db', 'in', pg_existing_dbs)
+              | selectattr('1', 'in', pg_existing_roles) | list }}
+
 # ── Privileges (revoke what is not wanted, then grant what is) ────────────────
 # Revoking only the privileges that are not wanted keeps every run idempotent and
 # makes a change such as ALL -> SELECT take effect.
 - name: Revoke database privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: database
     privs: CREATE,TEMPORARY
     state: absent
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when:
@@ -190,20 +220,20 @@
 
 - name: Grant database privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: database
     privs: "{{ 'ALL' if 'ALL' in item.priv.split(',') else 'CONNECT' }}"
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
 
 - name: Grant USAGE on the public schema
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: schema
     objs: public
@@ -211,13 +241,13 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
 
 - name: Revoke table privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: table
     objs: ALL_IN_SCHEMA
@@ -226,7 +256,7 @@
     state: absent
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when:
@@ -235,7 +265,7 @@
 
 - name: Grant table privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: table
     objs: ALL_IN_SCHEMA
@@ -244,14 +274,14 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }} ({{ item.priv }})"
   when: item.priv.split(',') | difference(['CONNECT']) | length > 0
 
 - name: Grant sequence privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: sequence
     objs: ALL_IN_SCHEMA
@@ -262,7 +292,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when: item.priv.split(',') | difference(['CONNECT']) | length > 0
@@ -270,7 +300,7 @@
 # Tables and sequences created later (migrations) get the same privileges automatically.
 - name: Default privileges on future tables
   community.postgresql.postgresql_privs:
-    database: "{{ item.0.db }}"
+    login_db: "{{ item.0.db }}"
     roles: "{{ item.0.role }}"
     type: default_privs
     objs: TABLES
@@ -280,13 +310,13 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_default_priv_pairs }}"
+  loop: "{{ pg_default_priv_pairs_effective }}"
   loop_control:
     label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
 
 - name: Default privileges on future sequences
   community.postgresql.postgresql_privs:
-    database: "{{ item.0.db }}"
+    login_db: "{{ item.0.db }}"
     roles: "{{ item.0.role }}"
     type: default_privs
     objs: SEQUENCES
@@ -298,7 +328,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_default_priv_pairs }}"
+  loop: "{{ pg_default_priv_pairs_effective }}"
   loop_control:
     label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
 
