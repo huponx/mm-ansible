@@ -37,14 +37,14 @@ flowchart LR
 | `inventories/production/group_vars/all/*.yml` | Variables. `*_vault.yml` files are encrypted |
 | `playbooks/site.yml` | Everything: preflight, common, cluster, database, cache |
 | `playbooks/{cluster,database,cache,common}.yml` | One part each, imported by `site.yml` |
-| `roles/` | `microk8s`, `argocd`, `reloader`, `application-pvc`, `k8s-secrets`, `postgres`, `redis`, `vault`, `common`, `backup` |
+| `roles/` | `microk8s`, `coredns`, `argocd`, `reloader`, `application-pvc`, `k8s-secrets`, `postgres`, `redis`, `vault`, `common`, `backup` |
 | `.github/workflows/ci.yml` | Pull requests: lint, syntax check, then a dry run with diff of what the PR deploys (same tag plan as the deploy) |
 | `.github/workflows/drift.yml` | Every Monday (and by hand): a full dry run, to see drift between the server and the repository |
 | `.github/workflows/deploy.yml` | Push to `main` or manual run: deploy |
 | `huponx/actions` `ansible-setup` | Shared setup action (lives in the `actions` repo, used as `@v1`): Python, collections, SSH, vault file |
 | `Makefile` | Short commands, see `make help` |
 
-Tags: `microk8s`, `argocd`, `reloader`, `pvc`, `secrets`, `vault`, `postgres`, `postgres_users`, `redis`, `common`, `backup`
+Tags: `microk8s`, `coredns`, `argocd`, `reloader`, `pvc`, `secrets`, `vault`, `postgres`, `postgres_users`, `redis`, `common`, `backup`
 (plus group tags `cluster`, `database`, `cache`).
 
 ## One-time setup
@@ -311,7 +311,7 @@ make lint                           # yamllint + ansible-lint
 
 | Changed files | Deploys |
 |---|---|
-| `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `k8s-secrets` (tag `secrets`), `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
+| `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `k8s-secrets` (tag `secrets`), `coredns`, `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
 | docs (`*.md`), `.github/**`, `Makefile`, lint configs, `requirements.txt`, `.env.example` | nothing: the deploy job and its approval are skipped |
 | anything else (`playbooks/`, `inventories/**/hosts.ini`, `ansible.cfg`, `requirements.yml`, a new role) | everything |
 
@@ -715,12 +715,30 @@ vault_k8s_secrets:
 - To delete a Secret: set `state: absent` on its entry, deploy, then remove the entry and its vault values in a later change.
 - Pods do not see a changed Secret value until they restart; the `reloader` role can restart workloads annotated for it.
 
+## CoreDNS hosts
+
+Tag `coredns` adds names to the cluster DNS, so pods resolve servers that live outside Kubernetes.
+mm-deploy `infra-services` has `ExternalName` Services (`postgres-external`, `redis-external`) that point to
+`postgres.my-network.local` and `redis.my-network.local`; CoreDNS must know those names.
+
+```yaml
+# inventories/production/group_vars/all/coredns.yml
+coredns_hosts:
+  - ip: 192.168.0.201
+    names: [postgres.my-network.local, redis.my-network.local]
+```
+
+`make deploy TAGS=coredns` writes one `hosts { ... fallthrough }` block, between the comments `# BEGIN mm-ansible hosts` and `# END mm-ansible hosts`,
+at the top of the `.:53 { }` block of `kube-system/coredns`, then restarts CoreDNS only when the Corefile changed. The rest of the Corefile is not touched;
+an empty list removes the block. Re-enabling the MicroK8s `dns` add-on resets the ConfigMap: run the tag again. Test from a pod: `nslookup postgres.my-network.local`.
+
 ## Other roles
 
 | Role | Purpose | Main variables |
 |---|---|---|
 | `microk8s` | Install MicroK8s, enable the add-ons in `microk8s_addons`, cert-manager issuer | `microk8s_version`, `metallb_ip_range`, `microk8s_addons`, `acme_email`, `cluster_issuer_name` |
 | `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
+| `coredns` | Static host names in the CoreDNS Corefile (for example the external PostgreSQL and Redis behind the mm-deploy `ExternalName` Services), then a CoreDNS restart | `coredns_hosts` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
 | `application-pvc` | PersistentVolumeClaim for applications | `pvc_name`, `pvc_namespace`, `pvc_storage`, `pvc_storage_class` |
 | `k8s-secrets` | Create, replace, merge-patch and delete Kubernetes Secrets | `k8s_secrets`, `vault_k8s_secrets` |

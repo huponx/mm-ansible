@@ -1,0 +1,8 @@
+---
+# Host names added to CoreDNS (tag `coredns`). mm-deploy infra-services/postgres and redis are ExternalName
+# Services that point to these names. Applied by `make deploy TAGS=coredns`.
+coredns_hosts:
+  - ip: 192.168.0.201
+    names:
+      - postgres.my-network.local
+      - redis.my-network.local

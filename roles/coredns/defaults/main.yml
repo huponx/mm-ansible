@@ -1,0 +1,13 @@
+---
+# Static host names resolved inside the cluster (CoreDNS `hosts` plugin), for example the external
+# PostgreSQL and Redis servers that ExternalName Services point to (mm-deploy infra-services).
+# The list is in group_vars/all/coredns.yml. An empty list removes the block this role manages.
+#
+#   coredns_hosts:
+#     - ip: 192.168.0.201
+#       names: [postgres.my-network.local, redis.my-network.local]
+coredns_hosts: []
+
+coredns_namespace: kube-system
+coredns_configmap: coredns
+coredns_deployment: coredns

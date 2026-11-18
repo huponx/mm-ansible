@@ -6,6 +6,8 @@
   roles:
     - role: microk8s
       tags: [microk8s, cluster]
+    - role: coredns
+      tags: [coredns, cluster]
     - role: argocd
       tags: [argocd, cluster]
     - role: reloader
