@@ -80,7 +80,7 @@ argocd_root_apps: []
 #     - name: ghcr-pull
 #       namespace: application
 #       registry: ghcr.io               # default
-#       service_account: default        # default
+#       service_account: default        # default; `none` only creates the secret (the charts then reference it with imagePullSecrets)
 #       # secret: <vault key>           # default: name
 #       # state: absent                 # removes the secret
 argocd_image_pull_secrets: []

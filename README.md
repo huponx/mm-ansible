@@ -571,9 +571,22 @@ vault_argocd_repo_secrets:
     password: "ghp_..."          # classic PAT with read:packages
 ```
 
-Pods that use another ServiceAccount (the charts can set `serviceAccount.create`) need the entry for that
-ServiceAccount too (`service_account: <name>`, one entry per namespace and ServiceAccount) or `imagePullSecrets` in
-the chart values. `state: absent` removes the secret.
+The secret is added to the `default` ServiceAccount, which covers the apps that do not create their own. The services
+that create their own ServiceAccount (`courier`, `identity`, `gatekeeper`: `serviceAccount.create: true`) get it
+from the chart instead, since the ServiceAccount only exists after ArgoCD has synced the app. The charts
+`go-application` >= 1.2.0, `web-application`, `python-application`, `go-job` and `migration-job` >= 1.1.0 accept
+`imagePullSecrets` (`deployment.imagePullSecrets`, `job.imagePullSecrets` or the top-level `imagePullSecrets` of
+`migration-job`), for example in the Application of `mm-deploy`:
+
+```yaml
+valuesObject:
+  deployment:
+    imagePullSecrets:
+      - name: ghcr-pull
+```
+
+Set `service_account: none` on the entry when only the charts reference the secret (no ServiceAccount is patched).
+`state: absent` removes the secret.
 
 HTTPS token or SSH deploy key for a private repository:
 

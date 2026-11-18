@@ -51,3 +51,10 @@ argocd_root_apps:
     automated: true              # sync by itself (default)
     prune: true                 # delete what is removed from git (default false)
     cascade_delete: true         # finalizer: deleting the root deletes its children
+
+# Pull secret for private images in GHCR (kubelet pulls images). Harmless while the packages are public.
+argocd_image_pull_secrets:
+  - name: ghcr-pull
+    namespace: application
+    secret: ghcr-read            # vault key: vault_argocd_repo_secrets.ghcr-read
+    service_account: none        # only create the secret; the charts reference it with imagePullSecrets
