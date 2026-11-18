@@ -1,4 +1,3 @@
-
 ---
 - name: Install prerequisite packages
   ansible.builtin.apt:
@@ -10,6 +9,7 @@
       - python3-psycopg2
     state: present
     update_cache: true
+    cache_valid_time: 3600
   become: true
 
 - name: Create APT keyrings directory
@@ -42,7 +42,7 @@
   ansible.builtin.apt:
     name: "postgresql-{{ postgres_version }}"
     state: present
-    update_cache: true
+    cache_valid_time: 3600
   become: true
 
 - name: Ensure PostgreSQL cluster is initialized
@@ -76,9 +76,37 @@
   become: true
   notify: Restart PostgreSQL
 
-- name: Manage PostgreSQL users and databases
-  ansible.builtin.include_tasks: users.yml
-  when: postgres_users | length > 0
+- name: Use scram-sha-256 for new passwords
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?password_encryption\\s*="
+    line: "password_encryption = scram-sha-256"
+    state: present
+  become: true
+  notify: Reload PostgreSQL
+  when: postgres_auth_method == 'scram-sha-256'
+
+- name: Apply extra postgresql.conf settings
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?{{ item.key }}\\s*="
+    line: "{{ item.key }} = '{{ item.value }}'"
+    state: present
+  become: true
+  loop: "{{ postgres_config | dict2items }}"
+  notify: Restart PostgreSQL
+
+# Handlers must run before users are managed: the settings above change how passwords are stored
+- name: Apply pending PostgreSQL restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Manage PostgreSQL roles, users and databases
+  ansible.builtin.include_tasks:
+    file: users.yml
+    apply:
+      tags: [postgres, postgres_users, database]
+  when: (postgres_roles + postgres_users + postgres_databases) | length > 0 or postgres_prune_unmanaged != 'off'
+  tags: [postgres, postgres_users, database]
 
 - name: Allow connections from configured CIDRs in pg_hba.conf
   ansible.builtin.blockinfile:
@@ -86,8 +114,19 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK - kubernetes pod access"
     block: |
       {% for cidr in postgres_allowed_cidrs %}
-      host    all    all    {{ cidr }}    md5
+      host    all    all    {{ cidr }}    {{ postgres_auth_method }}
       {% endfor %}
     state: "{{ 'present' if postgres_allowed_cidrs | length > 0 else 'absent' }}"
   become: true
   notify: Reload PostgreSQL
+
+- name: Apply pending PostgreSQL reloads
+  ansible.builtin.meta: flush_handlers
+
+- name: Check PostgreSQL accepts connections
+  ansible.builtin.command: "pg_isready -p {{ postgres_port }}"
+  changed_when: false
+  retries: 5
+  delay: 2
+  register: postgres_ready
+  until: postgres_ready.rc == 0

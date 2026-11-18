@@ -1,0 +1,14 @@
+---
+profile: basic
+exclude_paths:
+  - .github/
+  - inventories/production/group_vars/all/postgres_vault.yml
+  - inventories/production/group_vars/all/redis_vault.yml
+skip_list:
+  - command-instead-of-shell   # microk8s commands need a shell (pipes, quoting)
+  - no-handler
+  - role-name                    # application-pvc is referenced by name; not worth renaming
+  - var-naming[no-role-prefix]   # existing variable names (eso_*, pg_* facts) are kept
+  - yaml[line-length]
+warn_list:
+  - experimental

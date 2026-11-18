@@ -26,18 +26,19 @@
   changed_when: "'has been upgraded' in vault_install.stdout or 'has been deployed' in vault_install.stdout"
 
 # ── Wait for Vault pod ────────────────────────────────────────────────────────
-- name: Wait for vault-0 pod to be running
+- name: Wait for vault-0 pod to be running (it is only Ready after unseal)
   ansible.builtin.shell: >
     microk8s kubectl wait pod/vault-0
     -n {{ vault_namespace }}
-    --for=condition=Ready
+    --for=jsonpath='{.status.phase}'=Running
     --timeout=180s
-  ignore_errors: yes
+  changed_when: false
+  retries: 3
+  delay: 10
+  register: vault_pod_wait
+  until: vault_pod_wait.rc == 0
 
-# ── Init & unseal (standalone mode only) ──────────────────────────────────────
-- name: Skip init/unseal in dev mode
-  ansible.builtin.meta: noop
-  when: vault_dev_mode | bool
+# ── Init & unseal (standalone mode only; every task below is skipped in dev mode) ──
 
 - name: Check if Vault is already initialised
   ansible.builtin.shell: >
@@ -63,6 +64,7 @@
     -key-threshold={{ vault_key_threshold }}
     -format=json
   register: vault_init_raw
+  no_log: true
   when:
     - not vault_dev_mode | bool
     - vault_status is defined
@@ -71,54 +73,66 @@
 - name: Parse Vault init output
   ansible.builtin.set_fact:
     vault_init: "{{ vault_init_raw.stdout | from_json }}"
+  no_log: true
   when:
     - vault_init_raw is defined
     - vault_init_raw.stdout is defined
     - vault_init_raw.stdout | length > 0
 
+- name: Build the init Secret data
+  ansible.builtin.set_fact:
+    vault_init_string_data: >-
+      {{ vault_init_string_data | default({'root_token': vault_init.root_token})
+         | combine({'unseal_key_' ~ (idx + 1): vault_init.unseal_keys_b64[idx]}) }}
+  loop: "{{ range(0, vault_init.unseal_keys_b64 | length) | list }}"
+  loop_control:
+    loop_var: idx
+    label: "unseal_key_{{ idx + 1 }}"
+  no_log: true
+  when: vault_init is defined
+
 - name: Store unseal keys and root token in a Kubernetes Secret
-  ansible.builtin.shell: >
-    microk8s kubectl create secret generic {{ vault_init_secret_name }}
-    -n {{ vault_namespace }}
-    --from-literal=root_token={{ vault_init.root_token }}
-    {% for key in vault_init.unseal_keys_b64 %}
-    --from-literal=unseal_key_{{ loop.index }}={{ key }}
-    {% endfor %}
-    --dry-run=client -o yaml | microk8s kubectl apply -f -
+  ansible.builtin.command: microk8s kubectl apply -f -
+  args:
+    stdin: "{{ vault_init_secret_manifest | to_json }}"
+  vars:
+    vault_init_secret_manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ vault_init_secret_name }}"
+        namespace: "{{ vault_namespace }}"
+      type: Opaque
+      stringData: "{{ vault_init_string_data }}"
+  changed_when: true
+  no_log: true
   when: vault_init is defined
 
 - name: Unseal Vault with each key
-  ansible.builtin.shell: >
-    microk8s kubectl exec vault-0 -n {{ vault_namespace }}
-    -- vault operator unseal {{ item }}
+  ansible.builtin.command: >-
+    microk8s kubectl exec -i vault-0 -n {{ vault_namespace }}
+    -- sh -c 'vault operator unseal "$(cat)"'
+  args:
+    stdin: "{{ item }}"
   loop: "{{ vault_init.unseal_keys_b64 }}"
+  changed_when: true
+  no_log: true
   when: vault_init is defined
 
 # ── Unseal on restart (already initialised but sealed) ────────────────────────
-- name: Fetch existing unseal keys when Vault is sealed but already initialised
-  ansible.builtin.shell: >
+- name: Unseal Vault using keys stored in the cluster Secret
+  ansible.builtin.shell: >-
+    set -o pipefail;
     microk8s kubectl get secret {{ vault_init_secret_name }}
     -n {{ vault_namespace }}
-    -o jsonpath='{.data}'
-  register: existing_keys_raw
-  changed_when: false
-  failed_when: false
-  when:
-    - not vault_dev_mode | bool
-    - vault_status is defined
-    - vault_status.initialized
-    - vault_status.sealed
-
-- name: Unseal Vault using stored keys
-  ansible.builtin.shell: >
-    microk8s kubectl exec vault-0 -n {{ vault_namespace }}
-    -- vault operator unseal $(
-      microk8s kubectl get secret {{ vault_init_secret_name }}
-      -n {{ vault_namespace }}
-      -o jsonpath='{.data.unseal_key_{{ item }}}'
-      | base64 -d
-    )
-  loop: "{{ range(1, vault_key_shares + 1) | list }}"
+    -o jsonpath='{.data.unseal_key_{{ item }}}' | base64 -d
+    | microk8s kubectl exec -i vault-0 -n {{ vault_namespace }}
+    -- sh -c 'vault operator unseal "$(cat)"'
+  args:
+    executable: /bin/bash
+  loop: "{{ range(1, vault_key_threshold + 1) | list }}"
+  changed_when: true
+  no_log: true
   when:
     - not vault_dev_mode | bool
     - vault_status is defined

@@ -1,2 +1,52 @@
-# Ansible vault password file — never commit
+# Ansible vault password files - never commit
 .vault_pass
+.vault_pass.new
+.vault_pass_*
+
+# Local connection settings (see .env.example)
+.env
+.env.*
+!.env.example
+
+# CI SSH key pair and host key file generated during setup - never commit
+mm-ansible-deploy-key
+mm-ansible-deploy-key.pub
+mm-ansible-known-hosts
+*.pem
+id_ed25519
+id_ed25519.pub
+id_rsa
+id_rsa.pub
+
+# Decrypted copies of vault files
+*.decrypted
+*.dec.yml
+*_vault.yml.bak
+
+# Local run artifacts
+ansible.log
+ansible-check.log
+*.retry
+.ansible/
+.cache/
+
+# Python virtualenv and caches (make deps)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Collections installed into the repository, if any
+collections/ansible_collections/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

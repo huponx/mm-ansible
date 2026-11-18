@@ -1,0 +1,11 @@
+---
+# Set to true (group_vars) to enable this role: playbooks/common.yml skips it otherwise.
+backup_enabled: false
+
+backup_dir: /var/backups/mm
+backup_keep_days: 14
+# systemd OnCalendar expression
+backup_schedule: "*-*-* 03:00:00"
+
+backup_postgres: true
+backup_redis: true

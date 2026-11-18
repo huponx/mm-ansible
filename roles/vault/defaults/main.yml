@@ -35,3 +35,6 @@ eso_chart_version: ""            # empty = latest
 eso_helm_release: "external-secrets"
 eso_helm_repo_name: "external-secrets"
 eso_helm_repo_url: "https://charts.external-secrets.io"
+
+# The vault role is skipped by playbooks/cluster.yml unless this is true.
+vault_enabled: false

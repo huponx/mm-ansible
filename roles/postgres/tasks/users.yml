@@ -1,48 +1,143 @@
 ---
-# Manages PostgreSQL users, databases, and privileges.
+# Converges PostgreSQL roles, users, memberships, databases and privileges to the
+# variables in defaults/main.yml (set them in group_vars/all/postgres.yml).
 #
-# Variable contract:
-#   postgres_users                 list – see defaults/main.yml for shape
-#   vault_postgres_user_passwords  dict – keyed by username, vault-encrypted,
-#                                  stored in group_vars/all/postgres_vault.yml
+# Secrets: vault_postgres_user_passwords (group_vars/all/postgres_vault.yml, ansible-vault).
+# Connection: unix socket as the postgres OS user (peer authentication, needs the acl package).
 #
-# Privilege mapping (priv field in postgres_users[].databases[]):
-#   ALL    → GRANT ALL on database  +  GRANT ALL on all tables in schema public
-#   SELECT → GRANT CONNECT on database  +  GRANT USAGE on schema  +  GRANT SELECT on tables
-#   (other table-level privs follow the same pattern as SELECT)
-#
-# Authentication: become_user: postgres — Unix socket peer authentication.
-# Requires the 'acl' package (installed by the prerequisites task).
+# Order: validate -> group roles -> users -> memberships -> databases -> privileges
+#        -> removals -> prune report -> verification.
 
-- name: Verify vault passwords are defined for all users
+# ── Normalise the input ───────────────────────────────────────────────────────
+- name: Build the desired state
+  ansible.builtin.set_fact:
+    pg_roles_present: "{{ postgres_roles | selectattr('state', 'undefined') | list + postgres_roles | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list }}"
+    pg_roles_absent: "{{ postgres_roles | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list }}"
+    pg_users_present: "{{ postgres_users | selectattr('state', 'undefined') | list + postgres_users | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list }}"
+    pg_users_absent: "{{ postgres_users | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list }}"
+    pg_dbs_explicit_present: "{{ postgres_databases | selectattr('state', 'undefined') | list + postgres_databases | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list }}"
+    pg_dbs_explicit_absent: "{{ postgres_databases | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list }}"
+
+- name: Build database owners and the list of grants
+  ansible.builtin.set_fact:
+    pg_db_owners: >-
+      {%- set o = {} -%}
+      {%- for d in pg_dbs_explicit_present -%}{%- set _ = o.update({d.name: d.owner}) -%}{%- endfor -%}
+      {%- for u in pg_users_present -%}{%- for db in u.databases | default([]) -%}
+      {%- if db.name not in o -%}{%- set _ = o.update({db.name: u.name}) -%}{%- endif -%}
+      {%- endfor -%}{%- endfor -%}
+      {{ o | to_json }}
+    pg_grants: >-
+      {%- set g = [] -%}
+      {%- for r in pg_roles_present + pg_users_present -%}{%- for db in r.databases | default([]) -%}
+      {%- set _ = g.append({'role': r.name, 'db': db.name, 'priv': (db.priv | default('CONNECT') | upper | replace(' ', ''))}) -%}
+      {%- endfor -%}{%- endfor -%}
+      {{ g | to_json }}
+    pg_memberships: >-
+      {%- set m = [] -%}
+      {%- for u in pg_users_present -%}
+      {%- for r in u.roles | default([]) -%}{%- set _ = m.append({'user': u.name, 'group': r, 'state': 'present'}) -%}{%- endfor -%}
+      {%- for r in u.revoke_roles | default([]) -%}{%- set _ = m.append({'user': u.name, 'group': r, 'state': 'absent'}) -%}{%- endfor -%}
+      {%- endfor -%}
+      {{ m | to_json }}
+
+- name: Decode the computed structures
+  ansible.builtin.set_fact:
+    pg_db_owners: "{{ pg_db_owners | from_json }}"
+    pg_grants: "{{ pg_grants | from_json }}"
+    pg_memberships: "{{ pg_memberships | from_json }}"
+    pg_managed_names: "{{ (postgres_roles + postgres_users) | map(attribute='name') | list }}"
+
+- name: Build the default privileges pairs (grant, creator role)
+  ansible.builtin.set_fact:
+    pg_default_priv_pairs: >-
+      {%- set out = [] -%}
+      {%- for g in pg_grants -%}
+      {%- for creator in ([pg_db_owners[g.db]] + postgres_default_privs_creators) | unique -%}
+      {%- if g.role != creator and (g.priv.split(',') | difference(['CONNECT']) | length > 0) -%}
+      {%- set _ = out.append([g, creator]) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out | to_json }}
+
+- name: Decode the default privileges pairs
+  ansible.builtin.set_fact:
+    pg_default_priv_pairs: "{{ pg_default_priv_pairs | from_json }}"
+
+# ── Validate before changing anything ─────────────────────────────────────────
+- name: Validate names, protected roles, passwords and owners
   ansible.builtin.assert:
     that:
-      - vault_postgres_user_passwords[item.name] is defined
-    fail_msg: >
-      Missing vault password for PostgreSQL user '{{ item.name }}'.
-      Add it to postgres_vault.yml: vault_postgres_user_passwords['{{ item.name }}']
+      - (pg_managed_names + (pg_dbs_explicit_present + pg_dbs_explicit_absent) | map(attribute='name') | list)
+        | select('match', '^[A-Za-z0-9_-]+$') | list | length
+        == (pg_managed_names + (pg_dbs_explicit_present + pg_dbs_explicit_absent) | map(attribute='name') | list) | length
+      - pg_managed_names | intersect(postgres_protected_roles) | length == 0
+      - pg_managed_names | select('match', '^pg_') | list | length == 0
+      - pg_managed_names | unique | length == pg_managed_names | length
+      - pg_users_present | map(attribute='name') | reject('in', vault_postgres_user_passwords.keys() | list) | list | length == 0
+      - pg_dbs_explicit_present | map(attribute='owner') | reject('in', pg_managed_names) | list | length == 0
+    fail_msg: >-
+      Invalid PostgreSQL configuration. Check that names only use letters, digits, '_' and '-',
+      that no protected or pg_* role is managed, names are unique, every present user has a key in
+      vault_postgres_user_passwords (postgres_vault.yml), and database owners are managed users.
     quiet: true
-  loop: "{{ postgres_users }}"
+
+- name: Validate privileges
+  ansible.builtin.assert:
+    that:
+      - item.priv.split(',') | difference(['ALL', 'CONNECT', 'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) | length == 0
+      - item.db in pg_db_owners
+    fail_msg: "Invalid grant {{ item.role }} -> {{ item.db }} ({{ item.priv }})"
+    quiet: true
+  loop: "{{ pg_grants }}"
+  loop_control:
+    label: "{{ item.role }} -> {{ item.db }}"
+
+# ── Group roles and users ─────────────────────────────────────────────────────
+- name: Create group roles (NOLOGIN)
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    role_attr_flags: NOLOGIN
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ pg_roles_present }}"
   loop_control:
     label: "{{ item.name }}"
 
-- name: Create PostgreSQL users
+- name: Create or update users
   community.postgresql.postgresql_user:
     name: "{{ item.name }}"
     password: "{{ vault_postgres_user_passwords[item.name] }}"
+    no_password_changes: "{{ not (postgres_rotate_passwords | bool or item.rotate_password | default(false) | bool) }}"
+    role_attr_flags: "LOGIN {{ item.attrs.role_attr_flags | default('') }}"
+    conn_limit: "{{ item.attrs.connection_limit | default(omit) }}"
+    expires: "{{ item.attrs.valid_until | default(omit) }}"
     state: present
-    no_password_changes: true
   become: true
   become_user: postgres
-  loop: "{{ postgres_users }}"
+  loop: "{{ pg_users_present }}"
   loop_control:
     label: "{{ item.name }}"
   no_log: true
 
-- name: Create PostgreSQL databases
+- name: Manage group memberships
+  community.postgresql.postgresql_membership:
+    groups: "{{ item.group }}"
+    target_roles: "{{ item.user }}"
+    state: "{{ item.state }}"
+  become: true
+  become_user: postgres
+  loop: "{{ pg_memberships }}"
+  loop_control:
+    label: "{{ item.user }} {{ item.state }} in {{ item.group }}"
+
+# ── Databases ─────────────────────────────────────────────────────────────────
+- name: Create databases
   community.postgresql.postgresql_db:
-    name: "{{ item.1.name }}"
-    owner: "{{ item.0.name }}"
+    name: "{{ item.key }}"
+    owner: "{{ item.value }}"
     state: present
     encoding: UTF8
     lc_collate: en_US.UTF-8
@@ -50,68 +145,251 @@
     template: template0
   become: true
   become_user: postgres
-  loop: "{{ postgres_users | subelements('databases') }}"
+  loop: "{{ pg_db_owners | dict2items }}"
   loop_control:
-    label: "{{ item.0.name }}/{{ item.1.name }}"
+    label: "{{ item.key }} (owner {{ item.value }})"
 
-# --- Privilege grants ---
-# priv: ALL  →  single database-level ALL covers everything
-- name: Grant ALL privileges on database
+- name: Drop databases marked absent
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    state: absent
+    force: true
+  become: true
+  become_user: postgres
+  loop: "{{ pg_dbs_explicit_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: postgres_allow_drop_databases | bool
+
+- name: Skip dropping databases (postgres_allow_drop_databases is false)
+  ansible.builtin.debug:
+    msg: "Database {{ item.name }} is marked absent but NOT dropped. Set postgres_allow_drop_databases: true to allow it."
+  loop: "{{ pg_dbs_explicit_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not postgres_allow_drop_databases | bool
+
+# ── Privileges (revoke what is not wanted, then grant what is) ────────────────
+# Revoking only the privileges that are not wanted keeps every run idempotent and
+# makes a change such as ALL -> SELECT take effect.
+- name: Revoke database privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.1.name }}"
-    roles: "{{ item.0.name }}"
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
     type: database
-    privs: ALL
+    privs: CREATE,TEMPORARY
+    state: absent
+  become: true
+  become_user: postgres
+  loop: "{{ pg_grants }}"
+  loop_control:
+    label: "{{ item.role }} -> {{ item.db }}"
+  when:
+    - "'ALL' not in item.priv.split(',')"
+    - pg_db_owners[item.db] != item.role
+
+- name: Grant database privileges
+  community.postgresql.postgresql_privs:
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
+    type: database
+    privs: "{{ 'ALL' if 'ALL' in item.priv.split(',') else 'CONNECT' }}"
     state: present
   become: true
   become_user: postgres
-  loop: "{{ postgres_users | subelements('databases') }}"
+  loop: "{{ pg_grants }}"
   loop_control:
-    label: "{{ item.0.name }} → {{ item.1.name }} (ALL on database)"
-  when: item.1.priv == 'ALL'
+    label: "{{ item.role }} -> {{ item.db }}"
 
-# priv: <table-level>  →  three grants: CONNECT on db, USAGE on schema, priv on tables
-- name: Grant CONNECT on database for restricted users
+- name: Grant USAGE on the public schema
   community.postgresql.postgresql_privs:
-    database: "{{ item.1.name }}"
-    roles: "{{ item.0.name }}"
-    type: database
-    privs: CONNECT
-    state: present
-  become: true
-  become_user: postgres
-  loop: "{{ postgres_users | subelements('databases') }}"
-  loop_control:
-    label: "{{ item.0.name }} → {{ item.1.name }} (CONNECT)"
-  when: item.1.priv != 'ALL'
-
-- name: Grant USAGE on public schema for restricted users
-  community.postgresql.postgresql_privs:
-    database: "{{ item.1.name }}"
-    roles: "{{ item.0.name }}"
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
     type: schema
     objs: public
     privs: USAGE
     state: present
   become: true
   become_user: postgres
-  loop: "{{ postgres_users | subelements('databases') }}"
+  loop: "{{ pg_grants }}"
   loop_control:
-    label: "{{ item.0.name }} → {{ item.1.name }} (USAGE on schema)"
-  when: item.1.priv != 'ALL'
+    label: "{{ item.role }} -> {{ item.db }}"
 
-- name: Grant table-level privileges on all tables in public schema
+- name: Revoke table privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.1.name }}"
-    roles: "{{ item.0.name }}"
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
     type: table
     objs: ALL_IN_SCHEMA
     schema: public
-    privs: "{{ item.1.priv }}"
+    privs: "{{ ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] | difference(item.priv.split(',')) | join(',') }}"
+    state: absent
+  become: true
+  become_user: postgres
+  loop: "{{ pg_grants }}"
+  loop_control:
+    label: "{{ item.role }} -> {{ item.db }}"
+  when:
+    - "'ALL' not in item.priv.split(',')"
+    - pg_db_owners[item.db] != item.role
+
+- name: Grant table privileges
+  community.postgresql.postgresql_privs:
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
+    type: table
+    objs: ALL_IN_SCHEMA
+    schema: public
+    privs: "{{ 'ALL' if 'ALL' in item.priv.split(',') else (item.priv.split(',') | difference(['CONNECT']) | join(',')) }}"
     state: present
   become: true
   become_user: postgres
-  loop: "{{ postgres_users | subelements('databases') }}"
+  loop: "{{ pg_grants }}"
   loop_control:
-    label: "{{ item.0.name }} → {{ item.1.name }} ({{ item.1.priv }} on tables)"
-  when: item.1.priv != 'ALL'
+    label: "{{ item.role }} -> {{ item.db }} ({{ item.priv }})"
+  when: item.priv.split(',') | difference(['CONNECT']) | length > 0
+
+- name: Grant sequence privileges
+  community.postgresql.postgresql_privs:
+    database: "{{ item.db }}"
+    roles: "{{ item.role }}"
+    type: sequence
+    objs: ALL_IN_SCHEMA
+    schema: public
+    privs: >-
+      {{ 'ALL' if 'ALL' in item.priv.split(',')
+         else ('USAGE,SELECT,UPDATE' if (item.priv.split(',') | intersect(['INSERT', 'UPDATE'])) | length > 0 else 'SELECT') }}
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ pg_grants }}"
+  loop_control:
+    label: "{{ item.role }} -> {{ item.db }}"
+  when: item.priv.split(',') | difference(['CONNECT']) | length > 0
+
+# Tables and sequences created later (migrations) get the same privileges automatically.
+- name: Default privileges on future tables
+  community.postgresql.postgresql_privs:
+    database: "{{ item.0.db }}"
+    roles: "{{ item.0.role }}"
+    type: default_privs
+    objs: TABLES
+    schema: public
+    target_roles: "{{ item.1 }}"
+    privs: "{{ 'ALL' if 'ALL' in item.0.priv.split(',') else (item.0.priv.split(',') | difference(['CONNECT']) | join(',')) }}"
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ pg_default_priv_pairs }}"
+  loop_control:
+    label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
+
+- name: Default privileges on future sequences
+  community.postgresql.postgresql_privs:
+    database: "{{ item.0.db }}"
+    roles: "{{ item.0.role }}"
+    type: default_privs
+    objs: SEQUENCES
+    schema: public
+    target_roles: "{{ item.1 }}"
+    privs: >-
+      {{ 'ALL' if 'ALL' in item.0.priv.split(',')
+         else ('USAGE,SELECT,UPDATE' if (item.0.priv.split(',') | intersect(['INSERT', 'UPDATE'])) | length > 0 else 'SELECT') }}
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ pg_default_priv_pairs }}"
+  loop_control:
+    label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
+
+# ── Removals ──────────────────────────────────────────────────────────────────
+# Roles on the server that this role does not manage (login roles, no superusers)
+- name: List roles that exist on the server
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: "SELECT rolname FROM pg_roles WHERE rolname !~ '^pg_' AND NOT rolsuper"
+  become: true
+  become_user: postgres
+  register: pg_server_roles
+  changed_when: false
+  when: postgres_prune_unmanaged != 'off' or (pg_users_absent + pg_roles_absent) | length > 0
+
+- name: Work out unmanaged roles
+  ansible.builtin.set_fact:
+    pg_unmanaged: >-
+      {{ pg_server_roles.query_result | default([]) | map(attribute='rolname') | list
+         | difference(pg_managed_names) | difference(postgres_protected_roles) }}
+    pg_to_drop: >-
+      {{ ((pg_users_absent + pg_roles_absent) | map(attribute='name') | list
+          + (pg_server_roles.query_result | default([]) | map(attribute='rolname') | list
+             | difference(pg_managed_names) | difference(postgres_protected_roles)
+             if postgres_prune_unmanaged == 'delete' else []))
+         | intersect(pg_server_roles.query_result | default([]) | map(attribute='rolname') | list) }}
+  when: postgres_prune_unmanaged != 'off' or (pg_users_absent + pg_roles_absent) | length > 0
+
+- name: Report roles that exist on the server but are not in the variables
+  ansible.builtin.debug:
+    msg: "Unmanaged roles on the server: {{ pg_unmanaged | default([]) }} (postgres_prune_unmanaged={{ postgres_prune_unmanaged }})"
+  when:
+    - postgres_prune_unmanaged == 'report'
+    - pg_unmanaged | default([]) | length > 0
+
+- name: List databases
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: "SELECT datname FROM pg_database WHERE NOT datistemplate"
+  become: true
+  become_user: postgres
+  register: pg_server_dbs
+  changed_when: false
+  when: pg_to_drop | default([]) | length > 0
+
+# DROP OWNED also revokes the privileges the role holds in that database.
+- name: Reassign and drop owned objects of removed roles
+  community.postgresql.postgresql_query:
+    db: "{{ item.1.datname }}"
+    query: 'REASSIGN OWNED BY "{{ item.0 }}" TO postgres; DROP OWNED BY "{{ item.0 }}";'
+  become: true
+  become_user: postgres
+  loop: "{{ pg_to_drop | product(pg_server_dbs.query_result) | list }}"
+  loop_control:
+    label: "{{ item.0 }} in {{ item.1.datname }}"
+  when: pg_to_drop | default([]) | length > 0
+  changed_when: true
+
+- name: Drop removed roles
+  community.postgresql.postgresql_user:
+    name: "{{ item }}"
+    state: absent
+  become: true
+  become_user: postgres
+  loop: "{{ pg_to_drop | default([]) }}"
+
+# ── Verification ──────────────────────────────────────────────────────────────
+# A mismatch means the password in the vault differs from the one in the database
+# (the role does not overwrite existing passwords unless rotate_password is set).
+- name: Check that each user can log in with its vault password
+  community.postgresql.postgresql_ping:
+    db: "{{ (item.databases | first).name }}"
+    login_host: 127.0.0.1
+    port: "{{ postgres_port }}"
+    login_user: "{{ item.name }}"
+    login_password: "{{ vault_postgres_user_passwords[item.name] }}"
+  register: pg_login_check
+  failed_when: false
+  changed_when: false
+  loop: "{{ pg_users_present | selectattr('databases', 'defined') | selectattr('databases') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  when: postgres_verify_logins | bool
+
+- name: Warn about users whose vault password does not work
+  ansible.builtin.debug:
+    msg: >-
+      Login check failed for {{ item.item.name }}. The vault password may differ from the database.
+      Set rotate_password: true for this user to apply it.
+  loop: "{{ pg_login_check.results | default([]) | selectattr('is_available', 'defined') | rejectattr('is_available') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: postgres_verify_logins | bool

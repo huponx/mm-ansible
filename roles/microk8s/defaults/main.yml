@@ -1,0 +1,21 @@
+---
+microk8s_version: "1.36"
+microk8s_wait_timeout: 120
+
+metallb_ip_range: "192.168.0.150-192.168.0.200"
+
+# Add-ons enabled in this order. `args` is appended as `microk8s enable name:args`.
+# `wait` blocks until the workload is ready (only right after the add-on was enabled).
+microk8s_addons:
+  - name: dns
+    wait: { selector: "-l k8s-app=kube-dns", namespace: kube-system }
+  - name: ingress
+    wait: { selector: "-l name=nginx-ingress-microk8s", namespace: ingress }
+  - name: hostpath-storage
+  - name: metrics-server
+  - name: metallb
+    args: "{{ metallb_ip_range }}"
+    wait: { selector: "-l app=metallb", namespace: metallb-system }
+  - name: helm3
+  - name: cert-manager
+    wait: { kind: deployment, selector: "deployment/cert-manager", namespace: cert-manager, condition: available }

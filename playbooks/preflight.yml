@@ -1,0 +1,32 @@
+---
+# Fails early, before anything is changed, when the target or the secrets are not usable.
+- name: Preflight checks
+  hosts: all
+  become: false
+  gather_facts: true
+  tags: [always]
+  tasks:
+    - name: Check the target is a supported Ubuntu release
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('22.04', '>=')
+        fail_msg: >-
+          Unsupported target: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+          These roles are written for Ubuntu 22.04 or newer.
+        quiet: true
+
+    - name: Check the vault files were decrypted
+      ansible.builtin.assert:
+        that:
+          - vault_postgres_user_passwords is defined
+          - vault_redis_password is defined
+        fail_msg: >-
+          Vault variables are missing. Check .vault_pass / ANSIBLE_VAULT_PASS and that
+          group_vars/all/postgres_vault.yml and redis_vault.yml are present and encrypted.
+        quiet: true
+
+    - name: Check privilege escalation works without a prompt
+      ansible.builtin.command: "true"
+      become: true
+      changed_when: false

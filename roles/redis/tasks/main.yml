@@ -10,7 +10,7 @@
 - name: Install Redis
   ansible.builtin.apt:
     name: redis-server
-    state: latest
+    state: "{{ 'latest' if redis_upgrade | bool else 'present' }}"
   become: true
 
 # Ensure Redis starts on boot and is currently running
@@ -73,3 +73,40 @@
   notify: Restart Redis
   no_log: true
   when: redis_require_password
+
+# Optional memory limit and eviction policy
+- name: Configure Redis maxmemory
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?\\s*maxmemory\\s+"
+    line: "maxmemory {{ redis_maxmemory }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  when: redis_maxmemory | length > 0
+
+- name: Configure Redis maxmemory-policy
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?\\s*maxmemory-policy\\s+"
+    line: "maxmemory-policy {{ redis_maxmemory_policy }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  when: redis_maxmemory | length > 0
+
+# Apply pending restarts now so the check below tests the final configuration
+- name: Apply pending Redis restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Check Redis answers PING
+  ansible.builtin.command: redis-cli -p {{ redis_port }} ping
+  environment:
+    REDISCLI_AUTH: "{{ vault_redis_password if redis_require_password else '' }}"
+  register: redis_ping
+  changed_when: false
+  failed_when: "'PONG' not in redis_ping.stdout"
+  no_log: true
+  retries: 5
+  delay: 2
+  until: "'PONG' in redis_ping.stdout"

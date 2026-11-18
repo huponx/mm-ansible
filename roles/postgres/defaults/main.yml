@@ -7,12 +7,66 @@ postgres_pg_hba_path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
 postgres_allowed_cidrs:
   - "10.1.0.0/16"
 
-# postgres_users:
-#   - name: app_user          # must have a matching key in vault_postgres_user_passwords
-#     databases:
-#       - name: app_db
-#         priv: ALL           # ALL | SELECT | INSERT | UPDATE | DELETE | CONNECT
-#       - name: log_db
-#         priv: SELECT
+# Authentication method for the CIDRs above. scram-sha-256 also needs
+# password_encryption = scram-sha-256 (set by this role). Use "md5" only if some
+# password was stored as an md5 hash (users created on PostgreSQL < 14 defaults).
+postgres_auth_method: "scram-sha-256"
+
+# Extra postgresql.conf settings, applied with lineinfile, for example:
+#   postgres_config:
+#     shared_buffers: "512MB"
+#     max_connections: "200"
+postgres_config: {}
+
+# ── Users, group roles and databases ──────────────────────────────────────────
+# Group roles (NOLOGIN). Grant privileges to them, then add users as members.
+#   postgres_roles:
+#     - name: app_readonly
+#       databases:
+#         - { name: app_db, priv: SELECT }
+postgres_roles: []
+
+# Login users. Every present user needs a key in vault_postgres_user_passwords.
+#   postgres_users:
+#     - name: app_user
+#       state: present            # present (default) | absent
+#       roles: [app_readonly]     # member of these group roles
+#       revoke_roles: []          # remove membership of these group roles
+#       rotate_password: false    # apply the vault password to an existing user
+#       attrs:                    # optional
+#         connection_limit: 20
+#         valid_until: "2027-01-01"
+#         role_attr_flags: ""     # for example CREATEDB
+#       databases:
+#         - { name: app_db, priv: ALL }     # ALL | SELECT | INSERT | UPDATE | DELETE (comma separated)
 postgres_users: []
 
+# Optional explicit databases and owners. A database that is only referenced by
+# a user is created and owned by the first user (in list order) that references it.
+#   postgres_databases:
+#     - { name: app_db, owner: app_user, state: present }
+postgres_databases: []
+
+# Apply the vault password of every user on every run (false = only when the user is new,
+# or has rotate_password: true).
+postgres_rotate_passwords: false
+
+# Allow `state: absent` on a database to really DROP it (data loss). Off by default.
+postgres_allow_drop_databases: false
+
+# Users that exist on the server but are not listed above:
+#   off     = ignore
+#   report  = print them
+#   delete  = drop them (reassigns their objects to postgres first). Use with care.
+postgres_prune_unmanaged: "report"
+
+# Never created, changed or dropped by this role (names starting with pg_ are always protected).
+postgres_protected_roles:
+  - postgres
+
+# Default privileges so tables created later (by migrations) are usable by the grantees.
+# Extra roles that create objects in the managed databases (the database owner is always included).
+postgres_default_privs_creators: []
+
+# Test a login with the vault password after changes
+postgres_verify_logins: true

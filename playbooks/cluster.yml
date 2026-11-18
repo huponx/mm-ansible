@@ -1,0 +1,17 @@
+---
+# Kubernetes (MicroK8s) and the cluster add-ons.
+- name: Cluster
+  hosts: all
+  become: true
+  roles:
+    - role: microk8s
+      tags: [microk8s, cluster]
+    - role: argocd
+      tags: [argocd, cluster]
+    - role: reloader
+      tags: [reloader, cluster]
+    - role: application-pvc
+      tags: [pvc, cluster]
+    - role: vault
+      when: vault_enabled | default(false) | bool
+      tags: [vault, cluster]

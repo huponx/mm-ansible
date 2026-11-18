@@ -1,0 +1,9 @@
+---
+# PostgreSQL server and its users/roles/databases.
+# Run only the users part with: --tags postgres_users
+- name: Database
+  hosts: all
+  become: true
+  roles:
+    - role: postgres
+      tags: [postgres, database]

@@ -1,0 +1,51 @@
+---
+- name: Create the backup directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the backup script
+  ansible.builtin.template:
+    src: mm-backup.sh.j2
+    dest: /usr/local/sbin/mm-backup
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/mm-backup.service
+    content: |
+      [Unit]
+      Description=PostgreSQL and Redis backup
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/mm-backup
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/mm-backup.timer
+    content: |
+      [Unit]
+      Description=Daily PostgreSQL and Redis backup
+      [Timer]
+      OnCalendar={{ backup_schedule }}
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable the backup timer
+  ansible.builtin.systemd:
+    name: mm-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
