@@ -64,8 +64,8 @@ argocd_root_apps:
     recurse: true
     dest_namespace: infrastructure
     automated: true
-    prune: false                 # a manifest removed from git is not deleted from the cluster
-    cascade_delete: false        # deleting the root keeps the namespace and Services
+    prune: true                 # a manifest removed from git is not deleted from the cluster
+    cascade_delete: true        # deleting the root keeps the namespace and Services
 
 # Pull secret for private images in GHCR (kubelet pulls images). Harmless while the packages are public.
 argocd_image_pull_secrets:
