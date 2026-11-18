@@ -256,7 +256,7 @@ Which files are encrypted:
 |---|---|
 | `inventories/production/group_vars/all/postgres_vault.yml` | `vault_postgres_user_passwords` (one entry per user) |
 | `inventories/production/group_vars/all/redis_vault.yml` | `vault_redis_password` |
-| `inventories/production/group_vars/all/argocd_vault.yml` | `vault_argocd_user_passwords` (one entry per ArgoCD user, only when `argocd_users` is used) |
+| `inventories/production/group_vars/all/argocd_vault.yml` | `vault_argocd_user_passwords` (one entry per ArgoCD user) and `vault_argocd_repo_secrets` (repository credentials), only the parts you use |
 
 Plain files only reference names, for example `postgres.yml` lists users, never passwords.
 Rule: anything called `*_vault.yml` is encrypted before commit.
@@ -461,6 +461,180 @@ make deploy TAGS=argocd
 - `policy.csv` of `argocd-rbac-cm` is managed from `argocd_users` (`g, <user>, role:<role>` lines) plus `argocd_rbac_extra_policy`; manual edits to it are overwritten while `argocd_users` is not empty. `argocd_rbac_default_policy` (default `role:readonly`) applies to everyone else.
 - The `password_hash('bcrypt')` filter needs `passlib` and `bcrypt` on the machine that runs Ansible (in `requirements.txt`, so `make deps` installs them).
 
+### ArgoCD repositories and root applications
+
+ArgoCD reads a Git repository from a Secret in the `argocd` namespace. The role creates them from
+`inventories/production/group_vars/all/argocd.yml`:
+
+```yaml
+argocd_repositories:
+  - name: mm-deploy
+    url: https://github.com/huponx/mm-deploy.git
+    auth: token                  # none | token | ssh
+    secret: shared-token         # optional: vault key to use instead of `name`
+  - name: ghcr-charts            # Helm charts in GHCR (what mm-deploy uses: repoURL oci://ghcr.io/huponx/charts/<name>)
+    type: helm
+    oci: true
+    url: ghcr.io/huponx/charts   # no oci:// prefix; needed only when the packages are private
+    auth: token
+    secret: ghcr-read            # a classic PAT with read:packages
+  - name: old
+    url: https://github.com/huponx/old.git
+    state: absent                # removes the Secret
+
+# One credential for every repository whose URL starts with the prefix (no per-repository secret)
+argocd_repo_credentials:
+  - name: huponx
+    url: https://github.com/huponx
+    auth: token
+
+# An Application that reads a directory of Application manifests (app of apps)
+argocd_root_apps:
+  - name: root-production
+    repo_url: https://github.com/huponx/mm-deploy.git
+    path: applications/production
+    recurse: false               # also read sub-directories
+    automated: true              # sync by itself (default)
+    prune: false                 # delete what is removed from git (default false)
+    cascade_delete: true         # finalizer: deleting the root deletes its children (default)
+```
+
+Credentials are never in `argocd.yml`. They go in `argocd_vault.yml`, keyed by the `name` above:
+
+```yaml
+vault_argocd_repo_secrets:
+  mm-deploy:                     # auth: token
+    username: huponx
+    password: "github_pat_..."
+  huponx:                        # a repo-creds entry
+    username: huponx
+    password: "github_pat_..."
+  my-ssh:                        # auth: ssh
+    ssh_private_key: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
+      -----END OPENSSH PRIVATE KEY-----
+```
+
+The vault key is the `name` of the entry, or its `secret` field when set. To share one token between several
+entries, give them the same `secret` (one vault entry, many repositories):
+
+```yaml
+argocd_repositories:
+  - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token, secret: huponx-token }
+  - { name: mm-deploy-2, url: "https://github.com/huponx/other.git",   auth: token, secret: huponx-token }
+```
+
+```yaml
+# argocd_vault.yml
+vault_argocd_repo_secrets:
+  huponx-token:
+    username: huponx
+    password: "github_pat_..."
+```
+
+For every repository under one owner, `argocd_repo_credentials` (URL prefix) is shorter still: one entry, no
+`auth` on the repositories.
+
+Then `make vault-edit F=argocd_vault.yml` (or `vault-encrypt` for a new file) and `make deploy TAGS=argocd`.
+
+#### Private GHCR: charts and images
+
+The Applications of `mm-deploy` use `repoURL: oci://ghcr.io/huponx/charts/<name>`: Helm charts in GHCR, not a
+Git repository (the `huponx/charts` repository is only their source and ArgoCD never reads it). Three things
+can be private, and each has its own credential:
+
+| What | Who reads it | Credential | Setting |
+|---|---|---|---|
+| `mm-deploy` Git repository | ArgoCD | fine-grained PAT, `Contents: Read-only` on `mm-deploy` | `argocd_repositories` entry, `auth: token` |
+| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repositories` entry with `type: helm`, `oci: true` |
+| Images `ghcr.io/huponx/*` | kubelet of the cluster | the same kind of classic PAT | `argocd_image_pull_secrets` |
+
+Fine-grained PATs do not work with GHCR. Public packages need none of the last two. Use a classic PAT dedicated to
+`read:packages` (for example `ghcr-prod-pull-2027-11`), never one that also has `repo`.
+
+```yaml
+# argocd.yml
+argocd_image_pull_secrets:
+  - name: ghcr-pull
+    namespace: application       # created if missing
+    # registry: ghcr.io          # default
+    # service_account: default   # default: the secret is added to this ServiceAccount, so Pods need no imagePullSecrets
+    secret: ghcr-read            # vault key (default: name)
+```
+
+```yaml
+# argocd_vault.yml
+vault_argocd_repo_secrets:
+  ghcr-read:
+    username: huponx
+    password: "ghp_..."          # classic PAT with read:packages
+```
+
+The secret is added to the `default` ServiceAccount, which covers the apps that do not create their own. The services
+that create their own ServiceAccount (`courier`, `identity`, `gatekeeper`: `serviceAccount.create: true`) get it
+from the chart instead, since the ServiceAccount only exists after ArgoCD has synced the app. The charts
+`go-application` >= 1.2.0, `web-application`, `python-application`, `go-job` and `migration-job` >= 1.1.0 accept
+`imagePullSecrets` (`deployment.imagePullSecrets`, `job.imagePullSecrets` or the top-level `imagePullSecrets` of
+`migration-job`), for example in the Application of `mm-deploy`:
+
+```yaml
+valuesObject:
+  deployment:
+    imagePullSecrets:
+      - name: ghcr-pull
+```
+
+Set `service_account: none` on the entry when only the charts reference the secret (no ServiceAccount is patched).
+`state: absent` removes the secret.
+
+HTTPS token or SSH deploy key for a private repository:
+
+| | HTTPS + token (PAT) | SSH deploy key |
+|---|---|---|
+| Scope | a fine-grained PAT can be limited to chosen repositories, read-only (`Contents: read`) | one key per repository, read-only by default |
+| One credential for many repositories | yes (`argocd_repo_credentials` with a URL prefix, one PAT) | no: GitHub allows a deploy key on only one repository |
+| Expiry | fine-grained PATs expire (max 1 year): you must renew | does not expire |
+| Tied to a person | yes, the token acts as its owner (use a machine user if you can) | no, it belongs to the repository |
+| Setup | create the PAT, put it in the vault | `ssh-keygen`, add the public key in the repository settings, put the private key in the vault |
+| Firewall | port 443 | port 22 must be open |
+
+A PAT with one `argocd_repo_credentials` entry is the shortest for several private repositories; deploy keys fit
+best when you want a key that cannot read anything else. Use `https://` URLs with tokens and `git@github.com:owner/repo.git` with SSH keys.
+Public repositories need no credential: list them without `auth`.
+
+Using a token on a public repository also works (it raises the GitHub rate limit), but an expired or revoked
+token makes GitHub answer 401 even for public repositories, so the sync stops. Prefer no `auth` for public
+repositories, or one `argocd_repo_credentials` prefix entry and a renewal date for the token.
+
+Permissions the PAT needs (ArgoCD only clones and fetches, so read-only is enough):
+
+| PAT type | Settings |
+|---|---|
+| Fine-grained (recommended) | Resource owner: the owner of the repositories (for an organization, an admin must allow fine-grained PATs). Repository access: *Only select repositories*, pick the ones ArgoCD reads. Repository permissions: **Contents: Read-only** (`Metadata: Read-only` is added automatically). Nothing else. Set an expiry and note the renewal date. |
+| Classic | Scope `repo` (the only scope that reads private repositories; it also gives write access, so prefer fine-grained). Add `read:org` or authorize SSO only if the organization requires it. |
+
+- The `username` can be any non-empty string for a PAT, but use the account name.
+- A fine-grained PAT with *All repositories* would also work with one `argocd_repo_credentials` prefix, at the cost of a wider scope.
+- For an SSO-enforced organization, authorize the token for that organization after creating it.
+- To rotate: edit `argocd_vault.yml` with the new token and run `make deploy TAGS=argocd`.
+- Name the token `<system>-<environment>-<access>-<expiry>`, for example `argocd-prod-readonly-2027-11`, one token per
+  environment, and put the owner and purpose in its description. The vault key can use the same name
+  (`secret: argocd-prod-readonly`).
+
+What `prune`, `recurse` and `cascade_delete` do on a root application:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `automated` | `true` | ArgoCD syncs by itself; with `false` you sync by hand |
+| `prune` | `false` | With `true`, a manifest removed from git is deleted from the cluster; with `false` it only shows as OutOfSync |
+| `self_heal` | `true` | Undoes manual changes made in the cluster |
+| `recurse` | `false` | With `true`, sub-directories of `path` are read too (every YAML file in them is applied) |
+| `cascade_delete` | `true` | Finalizer: deleting the root also deletes its child Applications |
+
+- Secrets are applied with server-side apply and sent on stdin, so the secret is not left in a `last-applied` annotation or in the process list.
+- A root Application has the `resources-finalizer.argocd.argoproj.io` finalizer by default (`cascade_delete: true`): deleting it (`state: absent`) deletes the child Applications, and their resources too if each child also has the finalizer. Set `cascade_delete: false` to keep them.
+
 ## Redis
 
 | Variable | Default | Description |
@@ -479,7 +653,7 @@ The role checks `redis-cli ping` at the end.
 | Role | Purpose | Main variables |
 |---|---|---|
 | `microk8s` | Install MicroK8s, enable the add-ons in `microk8s_addons`, cert-manager issuer | `microk8s_version`, `metallb_ip_range`, `microk8s_addons`, `acme_email`, `cluster_issuer_name` |
-| `argocd` | Install ArgoCD (pinned manifest), its ingress and optional local users (`argocd_users`) | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
+| `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
 | `application-pvc` | PersistentVolumeClaim for applications | `pvc_name`, `pvc_namespace`, `pvc_storage`, `pvc_storage_class` |
 | `vault` | HashiCorp Vault and External Secrets Operator. Off unless `vault_enabled: true` | `vault_ingress_host`, `vault_dev_mode`, `eso_chart_version` |
