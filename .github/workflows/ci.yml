@@ -31,11 +31,35 @@ jobs:
       - name: Syntax check
         run: ansible-playbook playbooks/site.yml --syntax-check
 
+  # Picks what the PR would deploy after the merge (same script as Deploy), so the dry run covers exactly that.
+  plan:
+    name: plan (what this PR deploys)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.pick.outputs.mode }}
+      tags: ${{ steps.pick.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Pick what to dry run
+        id: pick
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Three dots: only what the PR changed, not what landed on the base branch meanwhile.
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" | bash .github/scripts/deploy-tags.sh
+          cat "$GITHUB_OUTPUT"
+
   check:
     name: dry run against the server (read-only)
     # Secrets are not available to forks, and a dry run needs them.
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    needs: lint
+    # Nothing to deploy (docs, CI, tooling only) = nothing to dry run.
+    if: github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.mode != 'none'
+    needs: [lint, plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Only one job talks to the server at a time (same group as deploy).
@@ -55,15 +79,21 @@ jobs:
           port: ${{ vars.ANSIBLE_SSH_PORT || '22' }}
 
       - name: Dry run with diff
+        env:
+          TAGS: ${{ needs.plan.outputs.tags }}
         run: |
           set -o pipefail
-          ansible-playbook playbooks/site.yml --check --diff 2>&1 | tee ansible-check.log
+          args=(playbooks/site.yml --check --diff)
+          [ -n "$TAGS" ] && args+=(--tags "$TAGS")
+          ansible-playbook "${args[@]}" 2>&1 | tee ansible-check.log
 
       - name: Summary
         if: always()
         run: |
           {
             echo "## Dry run (--check --diff)"
+            echo "- tags: \`${{ needs.plan.outputs.tags || 'all' }}\`"
+            echo ""
             echo '```'
             grep -A6 "PLAY RECAP" ansible-check.log || echo "No recap found"
             echo '```'

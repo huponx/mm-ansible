@@ -1,0 +1,54 @@
+name: Drift check
+
+# A weekly full dry run: shows what differs between the server and the repository, including parts
+# that no recent pull request touched (the pull request dry run only covers what it changes).
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ansible-prod
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: huponx/actions/.github/actions/ansible-setup@v1
+        with:
+          ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+          known-hosts: ${{ secrets.ANSIBLE_KNOWN_HOSTS }}
+          vault-password: ${{ secrets.ANSIBLE_VAULT_PASS }}
+          host: ${{ vars.ANSIBLE_HOST }}
+          user: ${{ vars.ANSIBLE_USER }}
+          port: ${{ vars.ANSIBLE_SSH_PORT || '22' }}
+
+      - name: Full dry run with diff
+        run: |
+          set -o pipefail
+          ansible-playbook playbooks/site.yml --check --diff 2>&1 | tee ansible-drift.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Drift check (full dry run)"
+            echo "Tasks reported as changed are differences between the server and the repository."
+            echo "Some commands cannot be predicted in check mode (see the README troubleshooting)."
+            echo '```'
+            grep -A6 "PLAY RECAP" ansible-drift.log || echo "No recap found"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove secrets
+        if: always()
+        run: |
+          [ -n "${SECRETS_DIR:-}" ] && rm -rf "$SECRETS_DIR" || true
+          rm -f ansible-drift.log

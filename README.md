@@ -37,7 +37,8 @@ flowchart LR
 | `playbooks/site.yml` | Everything: preflight, common, cluster, database, cache |
 | `playbooks/{cluster,database,cache,common}.yml` | One part each, imported by `site.yml` |
 | `roles/` | `microk8s`, `argocd`, `reloader`, `application-pvc`, `postgres`, `redis`, `vault`, `common`, `backup` |
-| `.github/workflows/ci.yml` | Pull requests: lint, syntax check, dry run with diff |
+| `.github/workflows/ci.yml` | Pull requests: lint, syntax check, then a dry run with diff of what the PR deploys (same tag plan as the deploy) |
+| `.github/workflows/drift.yml` | Every Monday (and by hand): a full dry run, to see drift between the server and the repository |
 | `.github/workflows/deploy.yml` | Push to `main` or manual run: deploy |
 | `huponx/actions` `ansible-setup` | Shared setup action (lives in the `actions` repo, used as `@v1`): Python, collections, SSH, vault file |
 | `Makefile` | Short commands, see `make help` |
@@ -159,7 +160,7 @@ Then:
 
 - **Settings, Environments, New environment** `production`: add **Required reviewers** so a deploy needs an approval.
 - **Settings, Branches, protect** `main`: require a pull request and the status check **CI / lint and syntax**
-(and **CI / dry run against the server** if you want the dry run to gate merges).
+(and **CI / dry run against the server** if you want the dry run to gate merges; a skipped dry run, when a PR only changes docs, counts as passed).
 
 The same with `gh api` (replace `OWNER/REPO`, and `REVIEWER` with a GitHub username):
 
@@ -298,11 +299,12 @@ make lint                           # yamllint + ansible-lint
 
 | In CI | Equivalent |
 |---|---|
-| Pull request | `make lint syntax` and `make check` (read-only) |
+| Pull request | `make lint syntax`, then `make check TAGS=<tags of the PR>` (read-only); skipped when the PR only changes docs, CI or tooling |
 | Merge to `main` | deploy workflow, only for what changed (below), after approval of the `production` environment |
-| Manual run | **Actions, Deploy, Run workflow**: optional `tags`, `limit`, `check_only` |
+| Manual run | **Actions, Deploy, Run workflow**: optional `tags`, `limit`, `check_only` (empty `tags` = everything) |
+| Weekly | **Drift check**: full `make check`, summary in the run page |
 
-**What a merge to `main` deploys.** The `plan` job of the deploy workflow reads the changed files
+**What a merge to `main` deploys.** The `plan` job of the deploy workflow (and of the pull request dry run, on the files of the PR) reads the changed files
 ([`.github/scripts/deploy-tags.sh`](.github/scripts/deploy-tags.sh)) and picks the tags:
 
 | Changed files | Deploys |
@@ -472,10 +474,9 @@ argocd_repositories:
     url: https://github.com/huponx/mm-deploy.git
     auth: token                  # none | token | ssh
     secret: shared-token         # optional: vault key to use instead of `name`
-  - name: ghcr-charts            # Helm charts in GHCR (what mm-deploy uses: repoURL oci://ghcr.io/huponx/charts/<name>)
-    type: helm
-    oci: true
-    url: ghcr.io/huponx/charts   # no oci:// prefix; needed only when the packages are private
+  - name: ghcr-courier           # one OCI chart; usually argocd_repo_credentials with a prefix is simpler (below)
+    type: oci
+    url: oci://ghcr.io/huponx/charts/courier
     auth: token
     secret: ghcr-read            # a classic PAT with read:packages
   - name: old
@@ -487,6 +488,11 @@ argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx
     auth: token
+  - name: ghcr                   # the charts of mm-deploy: repoURL oci://ghcr.io/huponx/charts/<name>
+    type: oci
+    url: oci://ghcr.io/huponx
+    auth: token
+    secret: ghcr-read
 
 # An Application that reads a directory of Application manifests (app of apps)
 argocd_root_apps:
@@ -547,8 +553,12 @@ can be private, and each has its own credential:
 | What | Who reads it | Credential | Setting |
 |---|---|---|---|
 | `mm-deploy` Git repository | ArgoCD | fine-grained PAT, `Contents: Read-only` on `mm-deploy` | `argocd_repositories` entry, `auth: token` |
-| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repositories` entry with `type: helm`, `oci: true` |
+| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repo_credentials` entry with `type: oci` and `url: oci://ghcr.io/huponx` |
 | Images `ghcr.io/huponx/*` | kubelet of the cluster | the same kind of classic PAT | `argocd_image_pull_secrets` |
+
+An Application with `repoURL: oci://...` needs a repository or credential of `type: oci` for that URL (also for public
+charts): without it ArgoCD treats the URL as Git and the app fails with `unsupported scheme "oci"`. The
+`type: helm` + `oci: true` form is for the other style, `repoURL: ghcr.io/huponx/charts` with the chart name in `chart:`.
 
 Fine-grained PATs do not work with GHCR. Public packages need none of the last two. Use a classic PAT dedicated to
 `read:packages` (for example `ghcr-prod-pull-2027-11`), never one that also has `repo`.
