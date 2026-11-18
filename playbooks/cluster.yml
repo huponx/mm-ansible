@@ -12,6 +12,8 @@
       tags: [reloader, cluster]
     - role: application-pvc
       tags: [pvc, cluster]
+    - role: k8s-secrets
+      tags: [secrets, cluster]
     - role: vault
       when: vault_enabled | default(false) | bool
       tags: [vault, cluster]

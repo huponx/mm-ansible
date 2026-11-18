@@ -22,12 +22,14 @@ while IFS= read -r f; do
     roles/argocd/*) add_tag argocd ;;
     roles/reloader/*) add_tag reloader ;;
     roles/application-pvc/*) add_tag pvc ;;
+    roles/k8s-secrets/*) add_tag secrets ;;
     roles/vault/*) add_tag vault ;;
     roles/postgres/*) add_tag postgres ;;
     roles/redis/*) add_tag redis ;;
     roles/common/*) add_tag common ;;
     roles/backup/*) add_tag backup ;;
     inventories/production/group_vars/all/argocd*.yml) add_tag argocd ;;
+    inventories/production/group_vars/all/k8s_secrets*.yml) add_tag secrets ;;
     inventories/production/group_vars/all/microk8s*.yml) add_tag microk8s ;;
     inventories/production/group_vars/all/postgres*.yml) add_tag postgres ;;
     inventories/production/group_vars/all/redis*.yml) add_tag redis ;;

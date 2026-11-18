@@ -1,6 +1,6 @@
 ---
 # Everything. Use tags to run one component:
-#   --tags microk8s | argocd | reloader | pvc | vault | postgres | postgres_users | redis | common | backup
+#   --tags microk8s | argocd | reloader | pvc | secrets | vault | postgres | postgres_users | redis | common | backup
 - name: Preflight checks
   ansible.builtin.import_playbook: preflight.yml
 

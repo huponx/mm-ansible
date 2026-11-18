@@ -1,0 +1,27 @@
+---
+# Kubernetes Secrets managed from this repository (tag: secrets).
+# The list is in group_vars/all/k8s_secrets.yml, the values in k8s_secrets_vault.yml (encrypted).
+#
+#   k8s_secrets:
+#     - name: app-env
+#       namespace: application
+#       type: Opaque                   # default; also kubernetes.io/tls, kubernetes.io/dockerconfigjson, ...
+#       mode: replace                  # replace (default): exactly the declared keys remain
+#                                      # merge: only the declared keys are added or changed, others are kept
+#       secret: application-app-env    # vault key (default: <namespace>-<name>)
+#       keys_absent: [OLD_KEY]         # merge only: keys to delete
+#       recreate: false                # true: delete and create again when the Secret type changed
+#     - name: legacy
+#       namespace: application
+#       state: absent                  # deletes the Secret (only if this role created it, or force: true)
+#       force: false
+#
+#   vault_k8s_secrets:                 # k8s_secrets_vault.yml
+#     application-app-env:
+#       DB_PASSWORD: "..."
+k8s_secrets: []
+
+# Label set on every Secret created or adopted by this role. A Secret without it is not deleted
+# (state: absent) unless the entry has force: true.
+k8s_secrets_managed_label: "app.kubernetes.io/managed-by"
+k8s_secrets_managed_value: "mm-ansible"
