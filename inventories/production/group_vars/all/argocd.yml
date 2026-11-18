@@ -56,6 +56,16 @@ argocd_root_apps:
     automated: true              # sync by itself (default)
     prune: true                 # delete what is removed from git (default false)
     cascade_delete: true         # finalizer: deleting the root deletes its children
+  # Plain manifests of mm-deploy (namespace infrastructure, ExternalName Services for postgres and redis,
+  # the gatekeeper-routes ConfigMap of this environment). Not Applications, so a separate root.
+  - name: infra-production
+    repo_url: https://github.com/huponx/mm-deploy.git
+    path: infra-services/production
+    recurse: true
+    dest_namespace: infrastructure
+    automated: true
+    prune: true                 # a manifest removed from git is not deleted from the cluster
+    cascade_delete: true        # deleting the root keeps the namespace and Services
 
 # Pull secret for private images in GHCR (kubelet pulls images). Harmless while the packages are public.
 argocd_image_pull_secrets:

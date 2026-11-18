@@ -147,7 +147,9 @@
           'project': item.project | default('default'),
           'source': {
             'repoURL': item.repo_url, 'targetRevision': item.revision | default('main'), 'path': item.path,
-            'directory': {'recurse': item.recurse | default(false) | bool}},
+            'directory': ({'recurse': item.recurse | default(false) | bool}
+                          | combine({'include': item.include} if item.include is defined else {})
+                          | combine({'exclude': item.exclude} if item.exclude is defined else {}))},
           'destination': {'server': 'https://kubernetes.default.svc', 'namespace': item.dest_namespace | default(argocd_namespace)},
           'syncPolicy': ({'automated': {'prune': item.prune | default(false) | bool, 'selfHeal': item.self_heal | default(true) | bool}}
                          if item.automated | default(true) | bool else {})}} | to_json }}

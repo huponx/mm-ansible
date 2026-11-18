@@ -67,6 +67,9 @@ argocd_repo_credentials: []
 #       path: applications/production
 #       revision: main          # default
 #       recurse: false          # also read sub-directories
+#       include: "{a.yaml,dir/*}"  # optional glob: only these files are read (relative to path)
+#       exclude: "{b.yaml}"       # optional glob: these files are skipped
+#       dest_namespace: infrastructure  # namespace for manifests that do not set one (default argocd)
 #       automated: true         # sync by itself (default)
 #       prune: false            # delete what is removed from git (default false)
 #       self_heal: true         # undo manual changes (default)
