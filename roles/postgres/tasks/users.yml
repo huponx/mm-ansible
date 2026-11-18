@@ -111,7 +111,8 @@
     name: "{{ item.name }}"
     password: "{{ vault_postgres_user_passwords[item.name] }}"
     no_password_changes: "{{ not (postgres_rotate_passwords | bool or item.rotate_password | default(false) | bool) }}"
-    role_attr_flags: "LOGIN {{ item.attrs.role_attr_flags | default('') }}"
+    role_attr_flags: >-
+      {{ (['LOGIN'] + (item.attrs.role_attr_flags | default('') | split(',') | map('trim') | select | list)) | join(',') }}
     conn_limit: "{{ item.attrs.connection_limit | default(omit) }}"
     expires: "{{ item.attrs.valid_until | default(omit) }}"
     state: present
