@@ -30,6 +30,8 @@
     state: started
     enabled: true
   when: common_fail2ban | bool
+  # In a dry run the package is not installed yet, so there is no service to find
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Configure the UFW firewall
   when: common_ufw_enabled | bool
@@ -49,9 +51,12 @@
       loop: "{{ common_ufw_rules }}"
       loop_control:
         label: "{{ item.port }} from {{ item.from | default('any') }}"
+      # In a dry run ufw is not installed yet
+      ignore_errors: "{{ ansible_check_mode }}"
 
     - name: Enable ufw with the default incoming policy
       community.general.ufw:
         state: enabled
         policy: "{{ common_ufw_default_incoming }}"
         direction: incoming
+      ignore_errors: "{{ ansible_check_mode }}"

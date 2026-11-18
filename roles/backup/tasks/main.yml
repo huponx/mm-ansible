@@ -49,3 +49,5 @@
     enabled: true
     state: started
     daemon_reload: true
+  # In a dry run the unit files above are not written yet
+  ignore_errors: "{{ ansible_check_mode }}"

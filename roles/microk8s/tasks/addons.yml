@@ -39,7 +39,8 @@
     label: "{{ item.name }}"
   when: item.name not in addons_enabled
   changed_when: false
-  retries: 3
+  # The pods may not exist yet right after `microk8s enable`: retry for up to 2 minutes
+  retries: 12
   delay: 10
   register: addon_wait
   until: addon_wait.rc == 0

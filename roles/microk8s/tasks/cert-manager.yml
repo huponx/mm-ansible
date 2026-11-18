@@ -8,4 +8,8 @@
 - name: Apply cluster issuer
   ansible.builtin.command: microk8s kubectl apply -f /tmp/cluster-issuer.yaml
   register: cluster_issuer_apply
+  # The cert-manager webhook can still be starting right after the add-on was enabled
+  retries: 6
+  delay: 10
+  until: cluster_issuer_apply.rc == 0
   changed_when: "'unchanged' not in cluster_issuer_apply.stdout"

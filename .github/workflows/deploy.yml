@@ -35,7 +35,7 @@ jobs:
     # Add required reviewers to this environment in the repository settings.
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: huponx/actions/.github/actions/ansible-setup@v1
         with:
