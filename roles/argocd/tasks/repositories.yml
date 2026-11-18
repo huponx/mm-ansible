@@ -18,11 +18,12 @@
       - (argocd_repositories | map(attribute='name') | list | unique | length) == argocd_repositories | length
       - (argocd_repo_credentials | map(attribute='name') | list | unique | length) == argocd_repo_credentials | length
       - (argocd_repositories + argocd_repo_credentials) | map(attribute='auth', default='none') | difference(['none', 'token', 'ssh']) | length == 0
-      - (argocd_repositories + argocd_repo_credentials) | map(attribute='type', default='git') | difference(['git', 'helm']) | length == 0
+      - (argocd_repositories + argocd_repo_credentials) | map(attribute='type', default='git') | difference(['git', 'helm', 'oci']) | length == 0
+      - (argocd_repositories + argocd_repo_credentials) | selectattr('type', 'defined') | selectattr('type', 'equalto', 'oci') | rejectattr('url', 'match', '^oci://') | list | length == 0
       - argocd_repo_credentials | map(attribute='auth', default='none') | difference(['token', 'ssh']) | length == 0
     fail_msg: >-
       Invalid argocd_repositories / argocd_repo_credentials / argocd_root_apps. Names use lowercase letters,
-      digits and '-' and are unique per list; auth is none, token or ssh (credential templates: token or ssh).
+      digits and '-' and are unique per list; auth is none, token or ssh (credential templates: token or ssh); type is git, helm or oci (oci urls start with oci://).
     quiet: true
 
 - name: Check the repository credentials exist in the vault
@@ -71,8 +72,8 @@
       {%- set data = {'url': r.url} -%}
       {%- if kind == 'repository' -%}
       {%- set _ = data.update({'type': r.type | default('git'), 'name': r.name}) -%}
-      {%- elif r.type | default('git') == 'helm' -%}
-      {%- set _ = data.update({'type': 'helm'}) -%}
+      {%- elif r.type | default('git') in ['helm', 'oci'] -%}
+      {%- set _ = data.update({'type': r.type}) -%}
       {%- endif -%}
       {%- if r.type | default('git') == 'helm' and r.oci | default(false) | bool -%}
       {%- set _ = data.update({'enableOCI': 'true'}) -%}

@@ -49,15 +49,19 @@ argocd_rbac_extra_policy: ""
 #   argocd_repositories:
 #     - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token }
 #     # secret: <vault key> shares one vault entry between several repositories (default: name)
-#     # Helm charts stored in an OCI registry (GHCR). The url has no oci:// prefix. A private registry needs
-#     # a classic PAT with read:packages in the vault (fine-grained PATs do not work with GHCR):
-#     - { name: ghcr-charts, type: helm, oci: true, url: "ghcr.io/huponx/charts", auth: token }
+#     # An OCI artifact or Helm chart used as `repoURL: oci://...` (path: .) in an Application:
+#     - { name: ghcr-courier, type: oci, url: "oci://ghcr.io/huponx/charts/courier" }
+#     # A Helm repository form (`repoURL: ghcr.io/huponx/charts`, no oci://) instead:
+#     - { name: ghcr-charts, type: helm, oci: true, url: "ghcr.io/huponx/charts" }
 #     - { name: old, url: "https://example.com/old.git", state: absent }
 argocd_repositories: []
 
 # One credential for every repository whose URL starts with `url` (no per-repository secret needed):
 #   argocd_repo_credentials:
 #     - { name: huponx, url: "https://github.com/huponx", auth: token }
+#     # Every chart under oci://ghcr.io/huponx (Applications with repoURL: oci://ghcr.io/huponx/...). The
+#     # token is a classic PAT with read:packages (fine-grained PATs do not work with GHCR):
+#     - { name: ghcr, type: oci, url: "oci://ghcr.io/huponx", auth: token, secret: ghcr-read }
 argocd_repo_credentials: []
 
 # Application that points at a directory of Application manifests (app of apps):

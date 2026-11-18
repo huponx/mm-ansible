@@ -472,10 +472,9 @@ argocd_repositories:
     url: https://github.com/huponx/mm-deploy.git
     auth: token                  # none | token | ssh
     secret: shared-token         # optional: vault key to use instead of `name`
-  - name: ghcr-charts            # Helm charts in GHCR (what mm-deploy uses: repoURL oci://ghcr.io/huponx/charts/<name>)
-    type: helm
-    oci: true
-    url: ghcr.io/huponx/charts   # no oci:// prefix; needed only when the packages are private
+  - name: ghcr-courier           # one OCI chart; usually argocd_repo_credentials with a prefix is simpler (below)
+    type: oci
+    url: oci://ghcr.io/huponx/charts/courier
     auth: token
     secret: ghcr-read            # a classic PAT with read:packages
   - name: old
@@ -487,6 +486,11 @@ argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx
     auth: token
+  - name: ghcr                   # the charts of mm-deploy: repoURL oci://ghcr.io/huponx/charts/<name>
+    type: oci
+    url: oci://ghcr.io/huponx
+    auth: token
+    secret: ghcr-read
 
 # An Application that reads a directory of Application manifests (app of apps)
 argocd_root_apps:
@@ -547,8 +551,12 @@ can be private, and each has its own credential:
 | What | Who reads it | Credential | Setting |
 |---|---|---|---|
 | `mm-deploy` Git repository | ArgoCD | fine-grained PAT, `Contents: Read-only` on `mm-deploy` | `argocd_repositories` entry, `auth: token` |
-| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repositories` entry with `type: helm`, `oci: true` |
+| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repo_credentials` entry with `type: oci` and `url: oci://ghcr.io/huponx` |
 | Images `ghcr.io/huponx/*` | kubelet of the cluster | the same kind of classic PAT | `argocd_image_pull_secrets` |
+
+An Application with `repoURL: oci://...` needs a repository or credential of `type: oci` for that URL (also for public
+charts): without it ArgoCD treats the URL as Git and the app fails with `unsupported scheme "oci"`. The
+`type: helm` + `oci: true` form is for the other style, `repoURL: ghcr.io/huponx/charts` with the chart name in `chart:`.
 
 Fine-grained PATs do not work with GHCR. Public packages need none of the last two. Use a classic PAT dedicated to
 `read:packages` (for example `ghcr-prod-pull-2027-11`), never one that also has `repo`.
