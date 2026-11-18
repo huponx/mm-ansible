@@ -2,4 +2,4 @@ ansible-core>=2.17,<2.21
 ansible-lint>=24.9,<26
 yamllint>=1.35,<2
 passlib>=1.7.4,<2   # bcrypt hashes for ArgoCD accounts (password_hash filter)
-bcrypt>=4.0,<5      # passlib breaks with bcrypt 5
+bcrypt>=4.0,<4.1   # 4.1+ removed __about__, which passlib 1.7.4 reads (harmless warning); 5+ breaks passlib
