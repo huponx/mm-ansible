@@ -23,8 +23,9 @@ flowchart LR
 4. [Day-to-day](#day-to-day)
 5. [PostgreSQL users and roles](#postgresql-users-and-roles)
 6. [Redis](#redis)
-7. [Other roles](#other-roles)
-8. [Troubleshooting](#troubleshooting)
+7. [Kubernetes secrets](#kubernetes-secrets)
+8. [Other roles](#other-roles)
+9. [Troubleshooting](#troubleshooting)
 
 ## Repository layout
 
@@ -36,14 +37,14 @@ flowchart LR
 | `inventories/production/group_vars/all/*.yml` | Variables. `*_vault.yml` files are encrypted |
 | `playbooks/site.yml` | Everything: preflight, common, cluster, database, cache |
 | `playbooks/{cluster,database,cache,common}.yml` | One part each, imported by `site.yml` |
-| `roles/` | `microk8s`, `argocd`, `reloader`, `application-pvc`, `postgres`, `redis`, `vault`, `common`, `backup` |
+| `roles/` | `microk8s`, `argocd`, `reloader`, `application-pvc`, `k8s-secrets`, `postgres`, `redis`, `vault`, `common`, `backup` |
 | `.github/workflows/ci.yml` | Pull requests: lint, syntax check, then a dry run with diff of what the PR deploys (same tag plan as the deploy) |
 | `.github/workflows/drift.yml` | Every Monday (and by hand): a full dry run, to see drift between the server and the repository |
 | `.github/workflows/deploy.yml` | Push to `main` or manual run: deploy |
 | `huponx/actions` `ansible-setup` | Shared setup action (lives in the `actions` repo, used as `@v1`): Python, collections, SSH, vault file |
 | `Makefile` | Short commands, see `make help` |
 
-Tags: `microk8s`, `argocd`, `reloader`, `pvc`, `vault`, `postgres`, `postgres_users`, `redis`, `common`, `backup`
+Tags: `microk8s`, `argocd`, `reloader`, `pvc`, `secrets`, `vault`, `postgres`, `postgres_users`, `redis`, `common`, `backup`
 (plus group tags `cluster`, `database`, `cache`).
 
 ## One-time setup
@@ -258,6 +259,7 @@ Which files are encrypted:
 | `inventories/production/group_vars/all/postgres_vault.yml` | `vault_postgres_user_passwords` (one entry per user) |
 | `inventories/production/group_vars/all/redis_vault.yml` | `vault_redis_password` |
 | `inventories/production/group_vars/all/argocd_vault.yml` | `vault_argocd_user_passwords` (one entry per ArgoCD user) and `vault_argocd_repo_secrets` (repository credentials), only the parts you use |
+| `inventories/production/group_vars/all/k8s_secrets_vault.yml` | `vault_k8s_secrets` (values of the Kubernetes Secrets, see [Kubernetes secrets](#kubernetes-secrets)) |
 
 Plain files only reference names, for example `postgres.yml` lists users, never passwords.
 Rule: anything called `*_vault.yml` is encrypted before commit.
@@ -309,7 +311,7 @@ make lint                           # yamllint + ansible-lint
 
 | Changed files | Deploys |
 |---|---|
-| `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
+| `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `k8s-secrets` (tag `secrets`), `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
 | docs (`*.md`), `.github/**`, `Makefile`, lint configs, `requirements.txt`, `.env.example` | nothing: the deploy job and its approval are skipped |
 | anything else (`playbooks/`, `inventories/**/hosts.ini`, `ansible.cfg`, `requirements.yml`, a new role) | everything |
 
@@ -666,6 +668,53 @@ What `prune`, `recurse` and `cascade_delete` do on a root application:
 Password: `ansible-vault edit inventories/production/group_vars/all/redis_vault.yml`, set `vault_redis_password`, then `make deploy TAGS=redis`.
 The role checks `redis-cli ping` at the end.
 
+## Kubernetes secrets
+
+Tag `secrets` (role `k8s-secrets`) creates, updates, patches and deletes Secrets in any namespace.
+Only the Secrets listed in `k8s_secrets` are touched: a Secret that is not listed is never pruned.
+The list is in `inventories/production/group_vars/all/k8s_secrets.yml`, the values in the encrypted `k8s_secrets_vault.yml`.
+
+```yaml
+# k8s_secrets.yml
+k8s_secrets:
+  - name: app-env
+    namespace: application
+    mode: replace                  # only DB_PASSWORD and API_KEY remain; other keys are removed
+    secret: application-app-env    # vault key (default: <namespace>-<name>)
+  - name: shared
+    namespace: application
+    mode: merge                    # add or change the declared keys, keep the others
+    keys_absent: [OLD_KEY]         # delete these keys
+  - name: legacy
+    namespace: application
+    state: absent                  # delete the Secret
+```
+
+```yaml
+# k8s_secrets_vault.yml  (make vault-encrypt F=k8s_secrets_vault.yml)
+vault_k8s_secrets:
+  application-app-env:
+    DB_PASSWORD: "change-me"
+    API_KEY: "change-me"
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `name`, `namespace` | required | The namespace is created when it does not exist (not for `state: absent`) |
+| `type` | `Opaque` | Also `kubernetes.io/tls`, `kubernetes.io/dockerconfigjson`, ... The type of a Secret is immutable: when it differs from the cluster the run fails, unless `recreate: true` (delete, then create) |
+| `mode` | `replace` | `replace`: exactly the declared keys remain. `merge`: only the declared keys are set, the other keys stay |
+| `keys_absent` | `[]` | `merge` only: keys to delete |
+| `state` | `present` | `absent` deletes the Secret |
+| `force` | `false` | Allow deleting a Secret that this role did not create |
+| `secret` | `<namespace>-<name>` | Key in `vault_k8s_secrets` |
+
+- Every Secret written by the role has the label `app.kubernetes.io/managed-by: mm-ansible`. `state: absent` deletes only Secrets with that label (an existing Secret gets it the first time it is listed as `present`), otherwise it fails unless `force: true`.
+- `kube-system` and the ArgoCD internal secrets (`argocd-secret`, `argocd-initial-admin-secret`, `repo-*`, `creds-*`) cannot be managed here; use the `argocd` role for repositories and pull secrets.
+- Values are sent on stdin with server-side apply, a JSON patch or a merge patch, so they are not in a `last-applied` annotation, the process list or the Ansible output (`no_log`). A second run reports `changed=0` when nothing differs.
+- `make check TAGS=secrets` lists, by name and key names only, which Secrets would be created, updated or deleted.
+- To delete a Secret: set `state: absent` on its entry, deploy, then remove the entry and its vault values in a later change.
+- Pods do not see a changed Secret value until they restart; the `reloader` role can restart workloads annotated for it.
+
 ## Other roles
 
 | Role | Purpose | Main variables |
@@ -674,6 +723,7 @@ The role checks `redis-cli ping` at the end.
 | `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
 | `application-pvc` | PersistentVolumeClaim for applications | `pvc_name`, `pvc_namespace`, `pvc_storage`, `pvc_storage_class` |
+| `k8s-secrets` | Create, replace, merge-patch and delete Kubernetes Secrets | `k8s_secrets`, `vault_k8s_secrets` |
 | `vault` | HashiCorp Vault and External Secrets Operator. Off unless `vault_enabled: true` | `vault_ingress_host`, `vault_dev_mode`, `eso_chart_version` |
 | `common` | Optional: unattended upgrades, fail2ban, UFW. Off unless `common_enabled: true` | `common_ufw_enabled`, `common_ufw_rules` |
 | `backup` | Optional: daily PostgreSQL dumps and Redis RDB copy via a systemd timer. Off unless `backup_enabled: true` | `backup_dir`, `backup_keep_days`, `backup_schedule` |

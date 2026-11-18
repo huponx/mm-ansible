@@ -1,0 +1,22 @@
+---
+# Create, replace, merge-patch, remove keys from and delete Kubernetes Secrets in any namespace.
+# Secret values are sent on stdin and never appear on a command line or in a last-applied annotation.
+
+- name: Validate the Kubernetes secrets list
+  ansible.builtin.assert:
+    that:
+      - k8s_secrets is sequence
+      - (k8s_secrets | map(attribute='name') | select('match', '^[a-z0-9][a-z0-9.-]*$') | list | length) == k8s_secrets | length
+      - (k8s_secrets | map(attribute='namespace', default='') | select('match', '^[a-z0-9][a-z0-9-]*$') | list | length) == k8s_secrets | length
+      - (k8s_secrets | map(attribute='namespace') | zip(k8s_secrets | map(attribute='name')) | map('join', '/') | unique | list | length) == k8s_secrets | length
+    fail_msg: >-
+      Invalid k8s_secrets: every entry needs a lowercase name and namespace, and a namespace/name pair
+      can be listed only once.
+    quiet: true
+
+- name: Manage the Kubernetes secrets
+  ansible.builtin.include_tasks: secret.yml
+  loop: "{{ k8s_secrets }}"
+  loop_control:
+    loop_var: ks
+    label: "{{ ks.namespace }}/{{ ks.name }}"
