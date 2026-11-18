@@ -474,9 +474,10 @@ argocd_repositories:
     url: https://github.com/huponx/mm-deploy.git
     auth: token                  # none | token | ssh
     secret: shared-token         # optional: vault key to use instead of `name`
-  - name: ghcr-courier           # one OCI chart; usually argocd_repo_credentials with a prefix is simpler (below)
-    type: oci
-    url: oci://ghcr.io/huponx/charts/courier
+  - name: ghcr-charts            # Helm charts in GHCR: the Helm repository form with Enable OCI
+    type: helm
+    oci: true
+    url: ghcr.io/huponx/charts   # no oci:// prefix
     auth: token
     secret: ghcr-read            # a classic PAT with read:packages
   - name: old
@@ -488,11 +489,6 @@ argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx
     auth: token
-  - name: ghcr                   # the charts of mm-deploy: repoURL oci://ghcr.io/huponx/charts/<name>
-    type: oci
-    url: oci://ghcr.io/huponx
-    auth: token
-    secret: ghcr-read
 
 # An Application that reads a directory of Application manifests (app of apps)
 argocd_root_apps:
@@ -553,12 +549,24 @@ can be private, and each has its own credential:
 | What | Who reads it | Credential | Setting |
 |---|---|---|---|
 | `mm-deploy` Git repository | ArgoCD | fine-grained PAT, `Contents: Read-only` on `mm-deploy` | `argocd_repositories` entry, `auth: token` |
-| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repo_credentials` entry with `type: oci` and `url: oci://ghcr.io/huponx` |
+| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | one `argocd_repositories` entry with `type: helm`, `oci: true` and `url: ghcr.io/huponx/charts` |
 | Images `ghcr.io/huponx/*` | kubelet of the cluster | the same kind of classic PAT | `argocd_image_pull_secrets` |
 
-An Application with `repoURL: oci://...` needs a repository or credential of `type: oci` for that URL (also for public
-charts): without it ArgoCD treats the URL as Git and the app fails with `unsupported scheme "oci"`. The
-`type: helm` + `oci: true` form is for the other style, `repoURL: ghcr.io/huponx/charts` with the chart name in `chart:`.
+This version of ArgoCD offers only the types `git` and `helm` (with *Enable OCI*) in Settings, Repositories, so OCI
+charts are registered as one Helm repository (`ghcr.io/huponx/charts`, no `oci://`). That entry matches an
+Application written in the Helm form:
+
+```yaml
+source:
+  repoURL: ghcr.io/huponx/charts   # no oci://
+  chart: courier                   # instead of path: .
+  targetRevision: "1.2.3"
+```
+
+An Application with `repoURL: oci://ghcr.io/huponx/charts/courier` and `path: .` (the OCI source form) is not matched
+by it: ArgoCD treats that URL as Git and fails with `unsupported scheme "oci"`. Either write the Applications in the
+Helm form, or upgrade ArgoCD (`argocd_version`) to a release that has the repository type `oci`, then add one
+`type: oci` repository per chart URL (`oci://ghcr.io/huponx/charts/<name>`).
 
 Fine-grained PATs do not work with GHCR. Public packages need none of the last two. Use a classic PAT dedicated to
 `read:packages` (for example `ghcr-prod-pull-2027-11`), never one that also has `repo`.

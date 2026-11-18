@@ -28,26 +28,26 @@ argocd_users:
 # argocd_root_apps:
 #   - { name: root-production, repo_url: "https://github.com/huponx/mm-deploy.git", path: applications/production }
 argocd_repositories:
-  # charts is not listed: ArgoCD reads the charts from oci://ghcr.io, not from that Git repository.
   - name: mm-deploy
     url: https://github.com/huponx/mm-deploy.git
     auth: token
     secret: huponx               # vault key (vault_argocd_repo_secrets.huponx), shared with the entry below
-  # Removes the old Helm-style repository (secret repo-ghcr-charts). Delete this entry after one deploy.
+  # Helm charts in GHCR (Helm repository form, Enable OCI). One entry for all the charts.
   - name: ghcr-charts
-    url: ghcr.io/huponx/charts
-    state: absent
+    type: helm
+    oci: true
+    url: ghcr.io/huponx/charts   # no oci:// prefix
+    auth: token
+    secret: ghcr-read            # vault key: classic PAT with read:packages
 argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx
     auth: token
-  # The Applications of mm-deploy use repoURL: oci://ghcr.io/huponx/charts/<name>. Without a repository of
-  # type oci for that URL, ArgoCD treats it as Git and fails with: unsupported scheme "oci".
+  # Removes the credentials template creds-ghcr created before. Delete this entry after one deploy.
   - name: ghcr
     type: oci
     url: oci://ghcr.io/huponx
-    auth: token
-    secret: ghcr-read            # vault key: classic PAT with read:packages
+    state: absent
 argocd_root_apps:
   - name: root-production
     repo_url: https://github.com/huponx/mm-deploy.git
