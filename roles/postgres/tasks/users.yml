@@ -170,6 +170,35 @@
     label: "{{ item.name }}"
   when: not postgres_allow_drop_databases | bool
 
+# ── Dry run support ───────────────────────────────────────────────────────────
+# In --check the roles and databases above are only simulated. GRANT/REVOKE need the real
+# role and database, so only the grants whose role and database already exist are simulated.
+- name: List the roles and databases that exist now (dry run only)
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: "SELECT 'role' AS kind, rolname AS name FROM pg_roles UNION ALL SELECT 'db', datname FROM pg_database"
+  become: true
+  become_user: postgres
+  register: pg_existing
+  changed_when: false
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Work out the grants that can be simulated
+  ansible.builtin.set_fact:
+    pg_existing_roles: "{{ pg_existing.query_result | default([]) | selectattr('kind', 'equalto', 'role') | map(attribute='name') | list }}"
+    pg_existing_dbs: "{{ pg_existing.query_result | default([]) | selectattr('kind', 'equalto', 'db') | map(attribute='name') | list }}"
+
+- name: Select the grants and default privileges to apply
+  ansible.builtin.set_fact:
+    pg_grants_effective: >-
+      {{ pg_grants if not ansible_check_mode
+         else pg_grants | selectattr('role', 'in', pg_existing_roles) | selectattr('db', 'in', pg_existing_dbs) | list }}
+    pg_default_priv_pairs_effective: >-
+      {{ pg_default_priv_pairs if not ansible_check_mode
+         else pg_default_priv_pairs | selectattr('0.role', 'in', pg_existing_roles) | selectattr('0.db', 'in', pg_existing_dbs)
+              | selectattr('1', 'in', pg_existing_roles) | list }}
+
 # ── Privileges (revoke what is not wanted, then grant what is) ────────────────
 # Revoking only the privileges that are not wanted keeps every run idempotent and
 # makes a change such as ALL -> SELECT take effect.
@@ -182,7 +211,7 @@
     state: absent
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when:
@@ -198,7 +227,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
 
@@ -212,7 +241,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
 
@@ -227,7 +256,7 @@
     state: absent
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when:
@@ -245,7 +274,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }} ({{ item.priv }})"
   when: item.priv.split(',') | difference(['CONNECT']) | length > 0
@@ -263,7 +292,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_grants }}"
+  loop: "{{ pg_grants_effective }}"
   loop_control:
     label: "{{ item.role }} -> {{ item.db }}"
   when: item.priv.split(',') | difference(['CONNECT']) | length > 0
@@ -281,7 +310,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_default_priv_pairs }}"
+  loop: "{{ pg_default_priv_pairs_effective }}"
   loop_control:
     label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
 
@@ -299,7 +328,7 @@
     state: present
   become: true
   become_user: postgres
-  loop: "{{ pg_default_priv_pairs }}"
+  loop: "{{ pg_default_priv_pairs_effective }}"
   loop_control:
     label: "{{ item.0.role }} -> {{ item.0.db }} (objects created by {{ item.1 }})"
 
