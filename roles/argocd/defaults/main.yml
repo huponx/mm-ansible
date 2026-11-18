@@ -17,3 +17,22 @@ argocd_ingress_tls_secret: "argocd-server-tls"
 argocd_ingress_use_cert_manager: true
 argocd_ingress_cluster_issuer: "letsencrypt-prod"
 argocd_ingress_force_ssl_redirect: true
+
+# ── Local accounts ────────────────────────────────────────────────────────────
+# The built-in `admin` account is left as it is. Every present user needs a password in
+# vault_argocd_user_passwords (group_vars/all/argocd_vault.yml, ansible-vault).
+#   argocd_users:
+#     - name: hung
+#       role: admin               # ArgoCD role: admin | readonly | a role from argocd_rbac_extra_policy
+#       apikey: false             # true lets the account create API tokens
+#       rotate_password: false    # apply the vault password to an existing account, then remove the flag
+#     - name: old-user
+#       state: absent             # removes the account and its password
+argocd_users: []
+
+# RBAC (managed by this role when argocd_users is not empty: policy.csv is overwritten).
+argocd_rbac_default_policy: "role:readonly"
+# Extra lines for policy.csv, for example custom roles:
+#   argocd_rbac_extra_policy: |
+#     p, role:deployer, applications, sync, */*, allow
+argocd_rbac_extra_policy: ""

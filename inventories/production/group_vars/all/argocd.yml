@@ -11,3 +11,12 @@ argocd_ingress_cluster_issuer: ""
 argocd_ingress_tls_secret: ""
 argocd_ingress_use_cert_manager: false
 argocd_ingress_force_ssl_redirect: false
+
+# Extra local accounts (the built-in `admin` is left as it is). Passwords: argocd_vault.yml.
+# See README, "ArgoCD users".
+# argocd_users:
+#   - name: hung
+#     role: admin
+argocd_users:
+  - name: huponx
+    role: admin
