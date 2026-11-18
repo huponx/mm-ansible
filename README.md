@@ -299,8 +299,20 @@ make lint                           # yamllint + ansible-lint
 | In CI | Equivalent |
 |---|---|
 | Pull request | `make lint syntax` and `make check` (read-only) |
-| Merge to `main` | deploy workflow after approval of the `production` environment: `ansible-playbook playbooks/site.yml --diff` |
+| Merge to `main` | deploy workflow, only for what changed (below), after approval of the `production` environment |
 | Manual run | **Actions, Deploy, Run workflow**: optional `tags`, `limit`, `check_only` |
+
+**What a merge to `main` deploys.** The `plan` job of the deploy workflow reads the changed files
+([`.github/scripts/deploy-tags.sh`](.github/scripts/deploy-tags.sh)) and picks the tags:
+
+| Changed files | Deploys |
+|---|---|
+| `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
+| docs (`*.md`), `.github/**`, `Makefile`, lint configs, `requirements.txt`, `.env.example` | nothing: the deploy job and its approval are skipped |
+| anything else (`playbooks/`, `inventories/**/hosts.ini`, `ansible.cfg`, `requirements.yml`, a new role) | everything |
+
+So bumping `argocd_version` in `argocd.yml` deploys only `argocd`. **Actions, Deploy, Run workflow** always uses its own `tags` input (empty = everything).
+A new component must be added to the script, otherwise a change to it falls into "everything".
 
 A second run must report `changed=0`. If it does not, something is not idempotent: open an issue or fix the task.
 
@@ -444,7 +456,8 @@ make vault-encrypt F=argocd_vault.yml
 make deploy TAGS=argocd
 ```
 
-- A password is set when the account has none yet. To change it later, edit the vault file, set `rotate_password: true` on the user, deploy, then remove the flag.
+- ArgoCD cannot switch off "change my password" in its UI or CLI. Ansible is the source of truth instead: with `argocd_enforce_passwords: true` (default) every run compares the stored hash with the vault password and puts the vault one back when they differ. A password changed in the UI therefore lasts until the next deploy, and that user is signed out when it is reverted. Set `argocd_enforce_passwords: false` to only set the password of accounts that have none.
+- To change a password on purpose, edit the vault file and deploy (with enforcement on, nothing else is needed; with it off, also set `rotate_password: true` on the user once). A deploy that changes nothing does not touch the passwords or sign anyone out.
 - `policy.csv` of `argocd-rbac-cm` is managed from `argocd_users` (`g, <user>, role:<role>` lines) plus `argocd_rbac_extra_policy`; manual edits to it are overwritten while `argocd_users` is not empty. `argocd_rbac_default_policy` (default `role:readonly`) applies to everyone else.
 - The `password_hash('bcrypt')` filter needs `passlib` and `bcrypt` on the machine that runs Ansible (in `requirements.txt`, so `make deps` installs them).
 

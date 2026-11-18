@@ -29,7 +29,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A push to main deploys only what the changed files belong to (see .github/scripts/deploy-tags.sh).
+  # A manual run uses its own inputs. Nothing to deploy = the deploy job (and its approval) is skipped.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.pick.outputs.mode }}
+      tags: ${{ steps.pick.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Pick what to deploy
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" != "push" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            printf 'mode=all\ntags=\n' >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "$BEFORE" "$GITHUB_SHA" | bash .github/scripts/deploy-tags.sh
+          fi
+          cat "$GITHUB_OUTPUT"
+
   deploy:
+    needs: plan
+    if: needs.plan.outputs.mode != 'none'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Add required reviewers to this environment in the repository settings.
@@ -54,7 +83,7 @@ jobs:
 
       - name: Run Ansible
         env:
-          TAGS: ${{ inputs.tags }}
+          TAGS: ${{ inputs.tags || needs.plan.outputs.tags }}
           LIMIT: ${{ inputs.limit }}
           CHECK_ONLY: ${{ inputs.check_only }}
         run: |
@@ -71,7 +100,7 @@ jobs:
           {
             echo "## Deployment"
             echo "- commit: \`${GITHUB_SHA::7}\`"
-            echo "- tags: \`${{ inputs.tags || 'all' }}\`"
+            echo "- tags: \`${{ inputs.tags || needs.plan.outputs.tags || 'all' }}\`"
             echo ""
             echo "### Ansible recap"
             echo '```'
