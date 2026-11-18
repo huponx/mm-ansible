@@ -472,8 +472,12 @@ argocd_repositories:
     url: https://github.com/huponx/mm-deploy.git
     auth: token                  # none | token | ssh
     secret: shared-token         # optional: vault key to use instead of `name`
-  - name: charts
-    url: https://github.com/huponx/charts.git     # public repository: no credential needed
+  - name: ghcr-charts            # Helm charts in GHCR (what mm-deploy uses: repoURL oci://ghcr.io/huponx/charts/<name>)
+    type: helm
+    oci: true
+    url: ghcr.io/huponx/charts   # no oci:// prefix; needed only when the packages are private
+    auth: token
+    secret: ghcr-read            # a classic PAT with read:packages
   - name: old
     url: https://github.com/huponx/old.git
     state: absent                # removes the Secret
@@ -518,7 +522,7 @@ entries, give them the same `secret` (one vault entry, many repositories):
 ```yaml
 argocd_repositories:
   - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token, secret: huponx-token }
-  - { name: charts,    url: "https://github.com/huponx/charts.git",    auth: token, secret: huponx-token }
+  - { name: mm-deploy-2, url: "https://github.com/huponx/other.git",   auth: token, secret: huponx-token }
 ```
 
 ```yaml
@@ -533,6 +537,43 @@ For every repository under one owner, `argocd_repo_credentials` (URL prefix) is 
 `auth` on the repositories.
 
 Then `make vault-edit F=argocd_vault.yml` (or `vault-encrypt` for a new file) and `make deploy TAGS=argocd`.
+
+#### Private GHCR: charts and images
+
+The Applications of `mm-deploy` use `repoURL: oci://ghcr.io/huponx/charts/<name>`: Helm charts in GHCR, not a
+Git repository (the `huponx/charts` repository is only their source and ArgoCD never reads it). Three things
+can be private, and each has its own credential:
+
+| What | Who reads it | Credential | Setting |
+|---|---|---|---|
+| `mm-deploy` Git repository | ArgoCD | fine-grained PAT, `Contents: Read-only` on `mm-deploy` | `argocd_repositories` entry, `auth: token` |
+| Helm charts `ghcr.io/huponx/charts/*` | ArgoCD | **classic** PAT, scope `read:packages` | `argocd_repositories` entry with `type: helm`, `oci: true` |
+| Images `ghcr.io/huponx/*` | kubelet of the cluster | the same kind of classic PAT | `argocd_image_pull_secrets` |
+
+Fine-grained PATs do not work with GHCR. Public packages need none of the last two. Use a classic PAT dedicated to
+`read:packages` (for example `ghcr-prod-pull-2027-11`), never one that also has `repo`.
+
+```yaml
+# argocd.yml
+argocd_image_pull_secrets:
+  - name: ghcr-pull
+    namespace: application       # created if missing
+    # registry: ghcr.io          # default
+    # service_account: default   # default: the secret is added to this ServiceAccount, so Pods need no imagePullSecrets
+    secret: ghcr-read            # vault key (default: name)
+```
+
+```yaml
+# argocd_vault.yml
+vault_argocd_repo_secrets:
+  ghcr-read:
+    username: huponx
+    password: "ghp_..."          # classic PAT with read:packages
+```
+
+Pods that use another ServiceAccount (the charts can set `serviceAccount.create`) need the entry for that
+ServiceAccount too (`service_account: <name>`, one entry per namespace and ServiceAccount) or `imagePullSecrets` in
+the chart values. `state: absent` removes the secret.
 
 HTTPS token or SSH deploy key for a private repository:
 

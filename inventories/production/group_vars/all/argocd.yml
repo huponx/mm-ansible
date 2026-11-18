@@ -28,12 +28,17 @@ argocd_users:
 # argocd_root_apps:
 #   - { name: root-production, repo_url: "https://github.com/huponx/mm-deploy.git", path: applications/production }
 argocd_repositories:
+  # charts is not listed: ArgoCD reads the charts from oci://ghcr.io, not from that Git repository.
   - name: mm-deploy
     url: https://github.com/huponx/mm-deploy.git
     auth: token
-  - name: charts
-    url: https://github.com/huponx/charts.git
+    secret: huponx               # vault key (vault_argocd_repo_secrets.huponx), shared with the entry below
+  - name: ghcr-charts            # Helm charts in GHCR (what mm-deploy uses: repoURL oci://ghcr.io/huponx/charts/<name>)
+    type: helm
+    oci: true
+    url: ghcr.io/huponx/charts   # no oci:// prefix; needed only when the packages are private
     auth: token
+    secret: ghcr-read            # a classic PAT with read:packages
 argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx

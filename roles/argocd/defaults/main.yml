@@ -49,7 +49,9 @@ argocd_rbac_extra_policy: ""
 #   argocd_repositories:
 #     - { name: mm-deploy, url: "https://github.com/huponx/mm-deploy.git", auth: token }
 #     # secret: <vault key> shares one vault entry between several repositories (default: name)
-#     - { name: charts, url: "https://github.com/huponx/charts.git" }
+#     # Helm charts stored in an OCI registry (GHCR). The url has no oci:// prefix. A private registry needs
+#     # a classic PAT with read:packages in the vault (fine-grained PATs do not work with GHCR):
+#     - { name: ghcr-charts, type: helm, oci: true, url: "ghcr.io/huponx/charts", auth: token }
 #     - { name: old, url: "https://example.com/old.git", state: absent }
 argocd_repositories: []
 
@@ -70,3 +72,15 @@ argocd_repo_credentials: []
 #       self_heal: true         # undo manual changes (default)
 #       cascade_delete: true    # finalizer: deleting it also deletes its child Applications (default)
 argocd_root_apps: []
+
+# Pull secrets for private images (kubelet pulls images, not ArgoCD). The secret is created in each namespace
+# and added to the `default` ServiceAccount (or the one named) so Pods use it without imagePullSecrets.
+# Credentials: vault_argocd_repo_secrets[<secret or name>] with username and password (classic PAT, read:packages).
+#   argocd_image_pull_secrets:
+#     - name: ghcr-pull
+#       namespace: application
+#       registry: ghcr.io               # default
+#       service_account: default        # default
+#       # secret: <vault key>           # default: name
+#       # state: absent                 # removes the secret
+argocd_image_pull_secrets: []

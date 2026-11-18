@@ -18,6 +18,7 @@
       - (argocd_repositories | map(attribute='name') | list | unique | length) == argocd_repositories | length
       - (argocd_repo_credentials | map(attribute='name') | list | unique | length) == argocd_repo_credentials | length
       - (argocd_repositories + argocd_repo_credentials) | map(attribute='auth', default='none') | difference(['none', 'token', 'ssh']) | length == 0
+      - (argocd_repositories + argocd_repo_credentials) | map(attribute='type', default='git') | difference(['git', 'helm']) | length == 0
       - argocd_repo_credentials | map(attribute='auth', default='none') | difference(['token', 'ssh']) | length == 0
     fail_msg: >-
       Invalid argocd_repositories / argocd_repo_credentials / argocd_root_apps. Names use lowercase letters,
@@ -70,6 +71,11 @@
       {%- set data = {'url': r.url} -%}
       {%- if kind == 'repository' -%}
       {%- set _ = data.update({'type': r.type | default('git'), 'name': r.name}) -%}
+      {%- elif r.type | default('git') == 'helm' -%}
+      {%- set _ = data.update({'type': 'helm'}) -%}
+      {%- endif -%}
+      {%- if r.type | default('git') == 'helm' and r.oci | default(false) | bool -%}
+      {%- set _ = data.update({'enableOCI': 'true'}) -%}
       {%- endif -%}
       {%- if r.state | default('present') == 'present' and auth == 'token' -%}
       {%- set _ = data.update({'username': vault_argocd_repo_secrets[r.secret | default(r.name)].username, 'password': vault_argocd_repo_secrets[r.secret | default(r.name)].password}) -%}

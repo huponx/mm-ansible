@@ -13,5 +13,9 @@
   include_tasks: repositories.yml
   when: (argocd_repositories + argocd_repo_credentials + argocd_root_apps) | length > 0
 
+- name: Configure image pull secrets
+  include_tasks: pull-secrets.yml
+  when: argocd_image_pull_secrets | length > 0
+
 # - name: Fix argocd repo-server init container
 #   include_tasks: patch-repo-server-init-container.yaml
