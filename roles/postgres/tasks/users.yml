@@ -204,7 +204,7 @@
 # makes a change such as ALL -> SELECT take effect.
 - name: Revoke database privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: database
     privs: CREATE,TEMPORARY
@@ -220,7 +220,7 @@
 
 - name: Grant database privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: database
     privs: "{{ 'ALL' if 'ALL' in item.priv.split(',') else 'CONNECT' }}"
@@ -233,7 +233,7 @@
 
 - name: Grant USAGE on the public schema
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: schema
     objs: public
@@ -247,7 +247,7 @@
 
 - name: Revoke table privileges that are not wanted
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: table
     objs: ALL_IN_SCHEMA
@@ -265,7 +265,7 @@
 
 - name: Grant table privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: table
     objs: ALL_IN_SCHEMA
@@ -281,7 +281,7 @@
 
 - name: Grant sequence privileges
   community.postgresql.postgresql_privs:
-    database: "{{ item.db }}"
+    login_db: "{{ item.db }}"
     roles: "{{ item.role }}"
     type: sequence
     objs: ALL_IN_SCHEMA
@@ -300,7 +300,7 @@
 # Tables and sequences created later (migrations) get the same privileges automatically.
 - name: Default privileges on future tables
   community.postgresql.postgresql_privs:
-    database: "{{ item.0.db }}"
+    login_db: "{{ item.0.db }}"
     roles: "{{ item.0.role }}"
     type: default_privs
     objs: TABLES
@@ -316,7 +316,7 @@
 
 - name: Default privileges on future sequences
   community.postgresql.postgresql_privs:
-    database: "{{ item.0.db }}"
+    login_db: "{{ item.0.db }}"
     roles: "{{ item.0.role }}"
     type: default_privs
     objs: SEQUENCES
