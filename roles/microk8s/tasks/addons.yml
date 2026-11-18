@@ -5,11 +5,15 @@
   ansible.builtin.command: microk8s status --format yaml
   register: microk8s_status
   changed_when: false
+  # Read-only: run it in --check too. On a fresh host MicroK8s is not installed yet
+  # in a dry run (the install task is only simulated), so tolerate a failure there.
+  check_mode: false
+  failed_when: microk8s_status.rc | default(1) != 0 and not ansible_check_mode
 
 - name: Parse enabled addons
   ansible.builtin.set_fact:
     addons_enabled: >-
-      {{ (microk8s_status.stdout | from_yaml).addons
+      {{ ((microk8s_status.stdout | default('') | from_yaml) or {}).addons | default([])
          | selectattr('status', 'equalto', 'enabled')
          | map(attribute='name') | list }}
 
