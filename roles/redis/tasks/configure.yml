@@ -1,0 +1,99 @@
+---
+# Everything that needs the installed package. Included from main.yml.
+# Ensure Redis starts on boot and is currently running
+- name: Start and enable Redis service
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+  become: true
+
+# Preserve the original configuration before making any changes
+- name: Backup original Redis configuration
+  ansible.builtin.copy:
+    src: /etc/redis/redis.conf
+    dest: /etc/redis/redis.conf.orig
+    remote_src: true
+    force: false
+  become: true
+
+# Set the port Redis listens on (default: 6379)
+- name: Configure Redis port
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?port\\s+"
+    line: "port {{ redis_port }}"
+    state: present
+  become: true
+  notify: Restart Redis
+
+# Set the bind address so Redis accepts connections on the specified interface
+- name: Configure Redis bind address
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?bind\\s+"
+    line: "bind {{ redis_bind }}"
+    state: present
+  become: true
+  notify: Restart Redis
+
+# Fail early if password auth is expected but vault_redis_password was not provided
+- name: Verify vault_redis_password is defined
+  ansible.builtin.assert:
+    that:
+      - vault_redis_password is defined
+      - vault_redis_password | length > 0
+    fail_msg: >
+      redis_require_password is true but vault_redis_password is not defined.
+      Add it to group_vars/all/redis_vault.yml and encrypt with ansible-vault.
+    quiet: true
+  when: redis_require_password
+
+# Set requirepass in redis.conf — secret sourced from vault_redis_password
+- name: Configure Redis password
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?requirepass\\s+"
+    line: "requirepass {{ vault_redis_password }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  no_log: true
+  when: redis_require_password
+
+# Optional memory limit and eviction policy
+- name: Configure Redis maxmemory
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?\\s*maxmemory\\s+"
+    line: "maxmemory {{ redis_maxmemory }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  when: redis_maxmemory | length > 0
+
+- name: Configure Redis maxmemory-policy
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^#?\\s*maxmemory-policy\\s+"
+    line: "maxmemory-policy {{ redis_maxmemory_policy }}"
+    state: present
+  become: true
+  notify: Restart Redis
+  when: redis_maxmemory | length > 0
+
+# Apply pending restarts now so the check below tests the final configuration
+- name: Apply pending Redis restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Check Redis answers PING
+  ansible.builtin.command: redis-cli -p {{ redis_port }} ping
+  environment:
+    REDISCLI_AUTH: "{{ vault_redis_password if redis_require_password else '' }}"
+  register: redis_ping
+  changed_when: false
+  failed_when: "'PONG' not in redis_ping.stdout"
+  no_log: true
+  retries: 5
+  delay: 2
+  until: "'PONG' in redis_ping.stdout"
