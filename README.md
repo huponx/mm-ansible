@@ -37,7 +37,8 @@ flowchart LR
 | `playbooks/site.yml` | Everything: preflight, common, cluster, database, cache |
 | `playbooks/{cluster,database,cache,common}.yml` | One part each, imported by `site.yml` |
 | `roles/` | `microk8s`, `argocd`, `reloader`, `application-pvc`, `postgres`, `redis`, `vault`, `common`, `backup` |
-| `.github/workflows/ci.yml` | Pull requests: lint, syntax check, dry run with diff |
+| `.github/workflows/ci.yml` | Pull requests: lint, syntax check, then a dry run with diff of what the PR deploys (same tag plan as the deploy) |
+| `.github/workflows/drift.yml` | Every Monday (and by hand): a full dry run, to see drift between the server and the repository |
 | `.github/workflows/deploy.yml` | Push to `main` or manual run: deploy |
 | `huponx/actions` `ansible-setup` | Shared setup action (lives in the `actions` repo, used as `@v1`): Python, collections, SSH, vault file |
 | `Makefile` | Short commands, see `make help` |
@@ -159,7 +160,7 @@ Then:
 
 - **Settings, Environments, New environment** `production`: add **Required reviewers** so a deploy needs an approval.
 - **Settings, Branches, protect** `main`: require a pull request and the status check **CI / lint and syntax**
-(and **CI / dry run against the server** if you want the dry run to gate merges).
+(and **CI / dry run against the server** if you want the dry run to gate merges; a skipped dry run, when a PR only changes docs, counts as passed).
 
 The same with `gh api` (replace `OWNER/REPO`, and `REVIEWER` with a GitHub username):
 
@@ -298,11 +299,12 @@ make lint                           # yamllint + ansible-lint
 
 | In CI | Equivalent |
 |---|---|
-| Pull request | `make lint syntax` and `make check` (read-only) |
+| Pull request | `make lint syntax`, then `make check TAGS=<tags of the PR>` (read-only); skipped when the PR only changes docs, CI or tooling |
 | Merge to `main` | deploy workflow, only for what changed (below), after approval of the `production` environment |
-| Manual run | **Actions, Deploy, Run workflow**: optional `tags`, `limit`, `check_only` |
+| Manual run | **Actions, Deploy, Run workflow**: optional `tags`, `limit`, `check_only` (empty `tags` = everything) |
+| Weekly | **Drift check**: full `make check`, summary in the run page |
 
-**What a merge to `main` deploys.** The `plan` job of the deploy workflow reads the changed files
+**What a merge to `main` deploys.** The `plan` job of the deploy workflow (and of the pull request dry run, on the files of the PR) reads the changed files
 ([`.github/scripts/deploy-tags.sh`](.github/scripts/deploy-tags.sh)) and picks the tags:
 
 | Changed files | Deploys |
