@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: huponx/actions/.github/actions/ansible-setup@v1
 
@@ -43,7 +43,7 @@ jobs:
       group: ansible-prod
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: huponx/actions/.github/actions/ansible-setup@v1
         with:
