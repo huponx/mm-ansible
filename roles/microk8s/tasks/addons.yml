@@ -37,7 +37,8 @@
   loop: "{{ microk8s_addons | selectattr('wait', 'defined') | list }}"
   loop_control:
     label: "{{ item.name }}"
-  when: item.name not in addons_enabled
+  # Nothing is enabled in a dry run, so there is nothing to wait for
+  when: item.name not in addons_enabled and not ansible_check_mode
   changed_when: false
   # The pods may not exist yet right after `microk8s enable`: retry for up to 2 minutes
   retries: 12

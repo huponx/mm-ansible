@@ -92,6 +92,9 @@
     REDISCLI_AUTH: "{{ vault_redis_password if redis_require_password else '' }}"
   register: redis_ping
   changed_when: false
+  # Read-only: run it in --check too. A skipped command has no output, which failed_when below
+  # would read as "no PONG".
+  check_mode: false
   failed_when: "'PONG' not in redis_ping.stdout"
   no_log: true
   retries: 5

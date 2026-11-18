@@ -175,7 +175,7 @@
 # role and database, so only the grants whose role and database already exist are simulated.
 - name: List the roles and databases that exist now (dry run only)
   community.postgresql.postgresql_query:
-    db: postgres
+    login_db: postgres
     query: "SELECT 'role' AS kind, rolname AS name FROM pg_roles UNION ALL SELECT 'db', datname FROM pg_database"
   become: true
   become_user: postgres
@@ -336,7 +336,7 @@
 # Roles on the server that this role does not manage (login roles, no superusers)
 - name: List roles that exist on the server
   community.postgresql.postgresql_query:
-    db: postgres
+    login_db: postgres
     query: "SELECT rolname FROM pg_roles WHERE rolname !~ '^pg_' AND NOT rolsuper"
   become: true
   become_user: postgres
@@ -366,7 +366,7 @@
 
 - name: List databases
   community.postgresql.postgresql_query:
-    db: postgres
+    login_db: postgres
     query: "SELECT datname FROM pg_database WHERE NOT datistemplate"
   become: true
   become_user: postgres
@@ -377,7 +377,7 @@
 # DROP OWNED also revokes the privileges the role holds in that database.
 - name: Reassign and drop owned objects of removed roles
   community.postgresql.postgresql_query:
-    db: "{{ item.1.datname }}"
+    login_db: "{{ item.1.datname }}"
     query: 'REASSIGN OWNED BY "{{ item.0 }}" TO postgres; DROP OWNED BY "{{ item.0 }}";'
   become: true
   become_user: postgres
@@ -400,7 +400,7 @@
 # (the role does not overwrite existing passwords unless rotate_password is set).
 - name: Check that each user can log in with its vault password
   community.postgresql.postgresql_ping:
-    db: "{{ (item.databases | first).name }}"
+    login_db: "{{ (item.databases | first).name }}"
     login_host: 127.0.0.1
     port: "{{ postgres_port }}"
     login_user: "{{ item.name }}"
