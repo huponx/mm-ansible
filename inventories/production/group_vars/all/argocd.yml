@@ -43,11 +43,6 @@ argocd_repo_credentials:
   - name: huponx
     url: https://github.com/huponx
     auth: token
-  # Removes the credentials template creds-ghcr created before. Delete this entry after one deploy.
-  - name: ghcr
-    type: oci
-    url: oci://ghcr.io/huponx
-    state: absent
 argocd_root_apps:
   - name: root-production
     repo_url: https://github.com/huponx/mm-deploy.git
