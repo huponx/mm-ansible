@@ -412,7 +412,9 @@
   loop_control:
     label: "{{ item.name }}"
   no_log: true
-  when: postgres_verify_logins | bool
+  # Skipped in --check: new or rotated passwords are not applied, so the vault password
+  # would be tried against the old one and report a mismatch that does not exist.
+  when: postgres_verify_logins | bool and not ansible_check_mode
 
 - name: Warn about users whose vault password does not work
   ansible.builtin.debug:
@@ -422,4 +424,4 @@
   loop: "{{ pg_login_check.results | default([]) | selectattr('is_available', 'defined') | rejectattr('is_available') | list }}"
   loop_control:
     label: "{{ item.item.name }}"
-  when: postgres_verify_logins | bool
+  when: postgres_verify_logins | bool and not ansible_check_mode
