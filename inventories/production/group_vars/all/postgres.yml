@@ -18,6 +18,7 @@ postgres_users:
   # (db-migration, user data-user-migration, the owner of `data`); default privileges give this user
   # the grants on every table and sequence created later.
   - name: data-user-rw
+    rotate_password: true   # TEMPORARY: the role existed before with another password; remove after one run
     databases:
       - name: data
         priv: SELECT,INSERT,UPDATE,DELETE
