@@ -10,10 +10,17 @@
 #       - { name: data, priv: SELECT }
 
 postgres_users:
-  - name: data-user-rw
+  - name: data-user-migration
     databases:
       - name: data
         priv: ALL
+  # Runtime of the services (identity, ...): DML only. Tables are created by the migration job
+  # (db-migration, user data-user-migration, the owner of `data`); default privileges give this user
+  # the grants on every table and sequence created later.
+  - name: data-user-rw
+    databases:
+      - name: data
+        priv: SELECT,INSERT,UPDATE,DELETE
   - name: data-user-ro
     databases:
       - name: data
@@ -26,7 +33,7 @@ postgres_users:
 # Databases are created when a user references them; the first user in the list owns it.
 # To choose the owner explicitly:
 # postgres_databases:
-#   - { name: data, owner: data-user-rw }
+#   - { name: data, owner: data-user-migration }
 
 # report = list server roles that are not defined here; delete = drop them; off = ignore
 postgres_prune_unmanaged: report
