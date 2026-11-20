@@ -1,0 +1,31 @@
+# PostgreSQL fixtures
+postgres_rotate_passwords: true   # one run only
+postgres_allow_drop_databases: false
+
+postgres_users:
+  - name: app-owner
+    databases:
+      - name: data
+        priv: ALL
+  # runtime user: its password was rotated
+  - name: app-rw
+    rotate_password: true   # TEMPORARY
+    revoke_roles: [old_group]
+    databases:
+      - name: data
+        priv: SELECT,INSERT
+  - name: app-ro
+    rotate_password: true
+    databases:
+      - name: data
+        priv: SELECT
+  - { name: flow-user, rotate_password: true, databases: [] }
+  # header of the next item
+  - name: old-user
+    state: absent
+    databases:
+      - name: data
+  - name: kept-user
+
+postgres_databases:
+  - { name: old-db, state: absent }

@@ -1,0 +1,10 @@
+# argocd fixtures
+argocd_users:
+  - name: hung
+    role: admin
+    rotate_password: true
+  - name: old
+    state: absent
+argocd_repositories:
+  - { name: old-repo, url: "https://example.com/old.git", state: absent }
+argocd_image_pull_secrets: []
