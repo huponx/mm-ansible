@@ -22,7 +22,6 @@ postgres_users:
       - name: data
         priv: SELECT,INSERT,UPDATE,DELETE
   - name: data-user-ro
-    rotate_password: true  # TEST of the one-shot cleanup: the cleanup PR must remove this line after the deploy
     databases:
       - name: data
         priv: SELECT
