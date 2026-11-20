@@ -20,7 +20,7 @@ flowchart LR
 1. [Repository layout](#repository-layout)
 2. [One-time setup](#one-time-setup)
 3. [Ansible Vault](#ansible-vault)
-4. [Day-to-day](#day-to-day)
+4. [Day-to-day](#day-to-day) (including [one-shot options](#one-shot-options))
 5. [PostgreSQL users and roles](#postgresql-users-and-roles)
 6. [Redis](#redis)
 7. [Kubernetes secrets](#kubernetes-secrets)
@@ -132,6 +132,7 @@ Settings, Secrets and variables, Actions:
 | Secret | `ANSIBLE_SSH_PRIVATE_KEY` | content of `mm-ansible-deploy-key` |
 | Secret | `ANSIBLE_KNOWN_HOSTS` | content of `mm-ansible-known-hosts` |
 | Secret | `ANSIBLE_VAULT_PASS` | the passphrase in `.vault_pass` |
+| Secret | `BOT_TOKEN` | token of the bot that opens the [cleanup pull request](#one-shot-options) after a deploy (optional, see below) |
 | Variable | `ANSIBLE_HOST` | server address, for example `server.example.com` |
 | Variable | `ANSIBLE_USER` | `ansible` |
 | Variable | `ANSIBLE_SSH_PORT` | `22` (optional, default 22) |
@@ -143,6 +144,7 @@ Or with the [GitHub CLI](https://cli.github.com/) (`gh auth login` first; run in
 gh secret set ANSIBLE_SSH_PRIVATE_KEY < mm-ansible-deploy-key
 gh secret set ANSIBLE_KNOWN_HOSTS     < mm-ansible-known-hosts
 gh secret set ANSIBLE_VAULT_PASS      < .vault_pass
+gh secret set BOT_TOKEN                      # optional, paste the token when asked (see below)
 
 # Variables
 gh variable set ANSIBLE_HOST     --body "server.example.com"
@@ -155,6 +157,14 @@ gh variable list
 ```
 
 Use the repository-level secrets above (the CI dry run job and the deploy job both read them).
+
+`BOT_TOKEN` is optional. Without it the deploy still works; only the cleanup pull request (see [One-shot options](#one-shot-options)) is skipped, with a warning.
+Why not the built-in `GITHUB_TOKEN`: a pull request opened with it does not start CI, so the required checks would never run.
+Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) (or a GitHub App token) with:
+
+- Repository access: only `huponx/mm-ansible`.
+- Permissions: **Contents: Read and write**, **Pull requests: Read and write**. Nothing else.
+- An expiry (for example 90 days). Rotate it before it expires and run `gh secret set BOT_TOKEN` again.
 `.vault_pass` must contain the passphrase without a trailing newline problem: `printf '%s' '...' > .vault_pass` (as in step 2) is correct.
 
 Then:
@@ -319,6 +329,27 @@ So bumping `argocd_version` in `argocd.yml` deploys only `argocd`. **Actions, De
 A new component must be added to the script, otherwise a change to it falls into "everything".
 
 A second run must report `changed=0`. If it does not, something is not idempotent: open an issue or fix the task.
+
+### One-shot options
+
+Some options are only meant for one run, for example `rotate_password: true`. Left in place they would repeat on every deploy.
+After a successful deploy (not `check_only`) the workflow scans the files of the tags that ran, with
+[`.github/scripts/cleanup-oneshot.py`](.github/scripts/cleanup-oneshot.py), and opens a pull request
+`chore/cleanup-one-shot` that removes them (needs `BOT_TOKEN`). The run summary lists what was removed and what was kept, and why. Nothing is merged automatically.
+
+| Tag that ran | File scanned |
+|---|---|
+| `postgres`, `postgres_*`, or all | `postgres.yml` |
+| `secrets`, or all | `k8s_secrets.yml` |
+| `argocd`, or all | `argocd.yml` |
+
+| Removed | Notes |
+|---|---|
+| `rotate_password`, `recreate`, `force`, `keys_absent`, `revoke_roles` | kept when the log has `Login check failed for <user>`, so the password change can be retried |
+| `postgres_rotate_passwords`, `postgres_allow_drop_databases` | set back to `false` |
+| whole list items with `state: absent` | a database is removed only when `postgres_allow_drop_databases: true` was set |
+
+`*_vault.yml` files are never opened. Test the script with `bash .github/scripts/tests/run.sh` (runs in CI too).
 
 **Roll back**: revert the pull request and merge it, the deploy applies the previous state.
 Packages and database content are not reverted by Ansible: restore from backups when needed (see the `backup` role below).

@@ -1,0 +1,4 @@
+TASK [postgres : Warn about users whose vault password does not work]
+ok: [server] => (item=app-ro) => {
+    "msg": "Login check failed for app-ro. The vault password may differ from the database.\n"
+}

@@ -3,3 +3,4 @@ ansible-lint>=24.9,<26
 yamllint>=1.35,<2
 passlib>=1.7.4,<2   # bcrypt hashes for ArgoCD accounts (password_hash filter)
 bcrypt>=4.0,<4.1   # 4.1+ removed __about__, which passlib 1.7.4 reads (harmless warning); 5+ breaks passlib
+ruamel.yaml>=0.18,<1   # .github/scripts/cleanup-oneshot.py edits the inventory without losing comments

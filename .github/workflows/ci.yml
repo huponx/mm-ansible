@@ -31,6 +31,9 @@ jobs:
       - name: Syntax check
         run: ansible-playbook playbooks/site.yml --syntax-check
 
+      - name: Self test of the one-shot cleanup script
+        run: bash .github/scripts/tests/run.sh
+
   # Picks what the PR would deploy after the merge (same script as Deploy), so the dry run covers exactly that.
   plan:
     name: plan (what this PR deploys)

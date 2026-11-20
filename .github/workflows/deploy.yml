@@ -63,6 +63,8 @@ jobs:
     timeout-minutes: 45
     # Add required reviewers to this environment in the repository settings.
     environment: production
+    outputs:
+      cleanup: ${{ steps.cleanup.outputs.changed }}
     steps:
       - uses: actions/checkout@v5
 
@@ -94,6 +96,31 @@ jobs:
           [ "$CHECK_ONLY" = "true" ] && args+=(--check)
           ansible-playbook "${args[@]}" 2>&1 | tee ansible.log
 
+      # Options that only have to be set for one run (rotate_password, state: absent, ...) are found
+      # here and removed by a pull request (job cleanup-pr). Only after a real, successful run.
+      - name: Find one-shot options to remove
+        id: cleanup
+        if: success() && inputs.check_only != true
+        env:
+          TAGS: ${{ inputs.tags || needs.plan.outputs.tags }}
+        run: |
+          python3 -c "import ruamel.yaml" 2>/dev/null || pip install --quiet "ruamel.yaml>=0.18,<1"
+          python3 .github/scripts/cleanup-oneshot.py --tags "$TAGS" --log ansible.log --report cleanup-report.md >/dev/null
+          git diff --binary -- inventories > cleanup.patch
+          cat cleanup-report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -s cleanup.patch ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
+          git checkout -- inventories
+
+      - name: Keep the cleanup patch for the pull request job
+        if: steps.cleanup.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-patch
+          path: |
+            cleanup.patch
+            cleanup-report.md
+          retention-days: 3
+
       - name: Summary
         if: always()
         run: |
@@ -112,4 +139,74 @@ jobs:
         if: always()
         run: |
           [ -n "${SECRETS_DIR:-}" ] && rm -rf "$SECRETS_DIR" || true
-          rm -f ansible.log
+          rm -f ansible.log cleanup.patch cleanup-report.md
+
+  # Opens (or updates) a pull request that removes the one-shot options found by the deploy job.
+  # It needs BOT_TOKEN: a pull request opened with the default GITHUB_TOKEN does not start CI.
+  # Nothing is merged here, a person reviews the report and merges.
+  cleanup-pr:
+    needs: deploy
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.cleanup == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      BRANCH: chore/cleanup-one-shot
+    steps:
+      - name: Check BOT_TOKEN
+        id: token
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          if [ -n "$BOT_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::BOT_TOKEN is not set, the cleanup pull request is skipped (README, One-time setup, step 4)."
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.token.outputs.present == 'true'
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.BOT_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          name: cleanup-patch
+
+      - name: Open or update the pull request
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "mm-ansible-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git apply --3way cleanup.patch; then
+            echo "::warning::The cleanup patch no longer applies to the default branch (it changed since the deploy). Run the deploy again or remove the options by hand."
+            exit 0
+          fi
+          if [ -z "$(git status --porcelain -- inventories)" ]; then
+            echo "Nothing left to remove."
+            exit 0
+          fi
+          git checkout -B "$BRANCH"
+          git add inventories
+          git commit -m "chore(ansible): remove one-shot options after deploy"
+          git push --force origin "$BRANCH"
+          {
+            cat cleanup-report.md
+            echo
+            echo "Opened by the Deploy workflow ([run]($RUN_URL)). Review the diff, then merge."
+          } > pr-body.md
+          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body-file pr-body.md
+          else
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "chore(ansible): remove one-shot options after deploy" --body-file pr-body.md
+          fi

@@ -1,0 +1,6 @@
+# argocd fixtures
+argocd_users:
+  - name: hung
+    role: admin
+argocd_repositories: []
+argocd_image_pull_secrets: []
