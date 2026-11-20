@@ -113,7 +113,7 @@ jobs:
 
       - name: Keep the cleanup patch for the pull request job
         if: steps.cleanup.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cleanup-patch
           path: |
