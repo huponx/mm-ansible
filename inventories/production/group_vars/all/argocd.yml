@@ -51,8 +51,8 @@ argocd_root_apps:
     automated: true              # sync by itself (default)
     prune: true                 # delete what is removed from git (default false)
     cascade_delete: true         # finalizer: deleting the root deletes its children
-  # Plain manifests of mm-deploy (namespace infrastructure, ExternalName Services for postgres and redis,
-  # the gatekeeper-routes ConfigMap of this environment). Not Applications, so a separate root.
+  # Plain manifests of mm-deploy (namespace infrastructure, ExternalName Services for postgres and redis).
+  # Not Applications, so a separate root. The gatekeeper routes are not here: the gatekeeper chart renders them.
   - name: infra-production
     repo_url: https://github.com/huponx/mm-deploy.git
     path: infra-services/production
