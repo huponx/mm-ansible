@@ -16,7 +16,7 @@ while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
     # Do not change the server
-    *.md | .github/* | Makefile | .ansible-lint | .yamllint | .gitignore | .env.example | requirements.txt)
+    *.md | .github/* | scripts/* | Makefile | .ansible-lint | .yamllint | .gitignore | .env.example | requirements.txt)
       ;;
     roles/microk8s/*) add_tag microk8s ;;
     roles/coredns/*) add_tag coredns ;;

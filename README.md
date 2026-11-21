@@ -322,7 +322,7 @@ make lint                           # yamllint + ansible-lint
 | Changed files | Deploys |
 |---|---|
 | `roles/<role>/**` or `group_vars/all/<role>*.yml` of `microk8s`, `argocd`, `reloader`, `application-pvc` (tag `pvc`), `k8s-secrets` (tag `secrets`), `coredns`, `vault`, `postgres`, `redis`, `common`, `backup` | only the tags of those components, for example `argocd` |
-| docs (`*.md`), `.github/**`, `Makefile`, lint configs, `requirements.txt`, `.env.example` | nothing: the deploy job and its approval are skipped |
+| docs (`*.md`), `.github/**`, `scripts/**`, `Makefile`, lint configs, `requirements.txt`, `.env.example` | nothing: the deploy job and its approval are skipped |
 | anything else (`playbooks/`, `inventories/**/hosts.ini`, `ansible.cfg`, `requirements.yml`, a new role) | everything |
 
 So bumping `argocd_version` in `argocd.yml` deploys only `argocd`. **Actions, Deploy, Run workflow** always uses its own `tags` input (empty = everything).
@@ -673,7 +673,7 @@ Permissions the PAT needs (ArgoCD only clones and fetches, so read-only is enoug
   environment, and put the owner and purpose in its description. The vault key can use the same name
   (`secret: argocd-prod-readonly`).
 
-The root `infra-production` applies the plain manifests of mm-deploy `infra-services/production/` (namespace `infrastructure`, the ExternalName Services for PostgreSQL and Redis, the `gatekeeper-routes` ConfigMap of the environment). Each environment is its own directory (`infra-services/<env>/`) and its own cluster; the root uses `prune: false`. Needs `make deploy TAGS=argocd`.
+The root `infra-production` applies the plain manifests of mm-deploy `infra-services/production/` (namespace `infrastructure`, the ExternalName Services for PostgreSQL and Redis; the gatekeeper routes are rendered by the gatekeeper chart, not here). Each environment is its own directory (`infra-services/<env>/`) and its own cluster; the root uses `prune: false`. Needs `make deploy TAGS=argocd`.
 
 What `prune`, `recurse` and `cascade_delete` do on a root application:
 
@@ -749,6 +749,48 @@ vault_k8s_secrets:
 - `make check TAGS=secrets` lists, by name and key names only, which Secrets would be created, updated or deleted.
 - To delete a Secret: set `state: absent` on its entry, deploy, then remove the entry and its vault values in a later change.
 - Pods do not see a changed Secret value until they restart; the `reloader` role can restart workloads annotated for it.
+
+### Identity and gatekeeper secrets
+
+These Secrets cannot live in `mm-deploy` (its policy forbids Secrets with data and secret literals), so they are created here from the vault. Add the values to `k8s_secrets_vault.yml` **before** the entries in `k8s_secrets.yml` are deployed, otherwise the `secrets` run fails on the missing vault key.
+
+| Secret (namespace `application`) | Key | Value | Used by |
+|---|---|---|---|
+| `identity-signing-key` | `signing.pem` | EC P-256 PEM private key | identity (mounted read-only at `/var/run/identity/keys/`), `IDENTITY_SIGNING_KEY_ID` in mm-deploy is its `kid` |
+| `identity-mfa-key` | `keys` | `k1:<base64 of 32 bytes>` | identity `IDENTITY_MFA_KEY`, seals the TOTP secrets |
+| `gatekeeper-session` | `keys` | `k1:<base64 of 32 bytes>` | gatekeeper `GATEKEEPER_SESSION_KEY`, seals the tokens kept in Redis |
+| `gatekeeper-client` | `secret` | printed once by `identityctl client create --id gatekeeper ...` | gatekeeper `GATEKEEPER_CLIENT_SECRET` |
+
+```bash
+make identity-secrets                      # generates the first three; copies the YAML to the clipboard on macOS (else prints it)
+make vault-edit F=k8s_secrets_vault.yml    # paste under vault_k8s_secrets:, save
+make deploy TAGS=secrets                   # or merge to main
+```
+
+`scripts/gen-identity-secrets.sh` writes nothing to disk. The vault block looks like this (the PEM is a block scalar):
+
+```yaml
+vault_k8s_secrets:
+  application-identity-signing-key:
+    signing.pem: |
+      -----BEGIN EC PRIVATE KEY-----
+      ...
+      -----END EC PRIVATE KEY-----
+  application-identity-mfa-key:
+    keys: "k1:..."
+  application-gatekeeper-session:
+    keys: "k1:..."
+  application-gatekeeper-client:
+    secret: "..."          # after `identityctl client create`, then make deploy TAGS=secrets again
+```
+
+Keep these values in the vault: losing `identity-mfa-key` makes every enrolled authenticator useless, losing `identity-signing-key` stops every issued token from verifying, losing `gatekeeper-session` only logs the web users out.
+
+**Rotation**
+- `gatekeeper-session` and `identity-mfa-key`: prepend the new key, keep the old one: `keys: "k2:<new>,k1:<old>"` (the first seals, the others only open). Remove `k1` later.
+- `identity-signing-key`: put the old PEM in a Secret `identity-previous-keys` as `<old kid>.pem` (add it as another entry here with its vault values), replace `signing.pem` in the vault, set a new `IDENTITY_SIGNING_KEY_ID` in the identity Application of mm-deploy, deploy both. Remove the previous key after the longest access token lifetime (10 minutes by default). Details in the identity README.
+- `gatekeeper-client`: rotate with the admin app (Clients, rotate secret) or `identityctl`, put the new value in the vault, `make deploy TAGS=secrets`.
+- After any change the pods need to restart; workloads of `go-application` carry the Reloader annotation, so the `reloader` role restarts them.
 
 ## CoreDNS hosts
 
