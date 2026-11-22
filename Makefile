@@ -39,5 +39,5 @@ vault-view: ## View a vault file, e.g. make vault-view F=postgres_vault.yml
 vault-encrypt: ## Encrypt a plaintext vault file, e.g. make vault-encrypt F=postgres_vault.yml
 	ansible-vault encrypt inventories/production/group_vars/all/$(F)
 
-identity-secrets: ## Print new identity and gatekeeper secret values for the vault (to the clipboard on macOS)
+identity-secrets: ## Print new identity, gatekeeper and first-admin secret values for the vault (to the clipboard on macOS)
 	@if command -v pbcopy >/dev/null; then scripts/gen-identity-secrets.sh | pbcopy && echo 'Copied to the clipboard: make vault-edit F=k8s_secrets_vault.yml and paste under vault_k8s_secrets'; else scripts/gen-identity-secrets.sh; fi
