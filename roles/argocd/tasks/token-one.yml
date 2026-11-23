@@ -23,7 +23,7 @@
         [ "$rc" -eq 0 ] || exit 1
         echo "step whoami: $(argocd account get-user-info $flags 2>&1 | tr '\n' ' ')" >&2
         tok=$(argocd account generate-token --account "{{ pair.0.account }}" $flags {{ ('--expires-in ' ~ pair.0.expires_in) if pair.0.expires_in | default('') | length > 0 else '' }} 2>/tmp/gen.err); rc=$?
-        echo "step generate-token: rc=$rc stdout_len=${#tok} stderr=$(tr '\n' ' ' </tmp/gen.err)" >&2
+        echo "step generate-token: rc=$rc stdout_len=$(printf %s "$tok" | wc -c) stderr=$(tr '\n' ' ' </tmp/gen.err)" >&2
         rm -f /tmp/gen.err
         [ "$rc" -eq 0 ] && [ -n "$tok" ] || exit 1
         printf '%s' "$tok"
