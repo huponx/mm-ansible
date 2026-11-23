@@ -14,12 +14,19 @@
       - sh
       - -c
       - |
-        set -e
         read -r PW
         cfg=$(mktemp)
         trap 'rm -f "$cfg"' EXIT
-        argocd login localhost:8080 --plaintext --grpc-web --config "$cfg" --username "{{ pair.0.account }}" --password "$PW" >/dev/null
-        argocd account generate-token --account "{{ pair.0.account }}" --config "$cfg" --plaintext --grpc-web {{ ('--expires-in ' ~ pair.0.expires_in) if pair.0.expires_in | default('') | length > 0 else '' }}
+        flags="--config $cfg --plaintext --grpc-web"
+        out=$(argocd login localhost:8080 $flags --username "{{ pair.0.account }}" --password "$PW" 2>&1); rc=$?
+        echo "step login: rc=$rc $(printf '%s' "$out" | tr '\n' ' ' | sed "s/$PW/***/g")" >&2
+        [ "$rc" -eq 0 ] || exit 1
+        echo "step whoami: $(argocd account get-user-info $flags 2>&1 | tr '\n' ' ')" >&2
+        tok=$(argocd account generate-token --account "{{ pair.0.account }}" $flags {{ ('--expires-in ' ~ pair.0.expires_in) if pair.0.expires_in | default('') | length > 0 else '' }} 2>/tmp/gen.err); rc=$?
+        echo "step generate-token: rc=$rc stdout_len=${#tok} stderr=$(tr '\n' ' ' </tmp/gen.err)" >&2
+        rm -f /tmp/gen.err
+        [ "$rc" -eq 0 ] && [ -n "$tok" ] || exit 1
+        printf '%s' "$tok"
     stdin: "{{ vault_argocd_user_passwords[pair.0.account] }}"
   register: argocd_generated_token
   changed_when: true
@@ -35,7 +42,7 @@
       ArgoCD did not return a token for {{ pair.0.account }} (rc={{ argocd_generated_token.rc }}).
       Likely causes: the account lacks the apiKey capability, RBAC (accounts, update, {{ pair.0.account }}),
       a wrong password in vault_argocd_user_passwords, or a wrong login flag. stderr of the CLI:
-      {{ argocd_generated_token.stderr | default('') | regex_replace('(?i)(token|password)[^\\n]*', '\\1 <hidden>') }}
+      {{ argocd_generated_token.stderr | default('') }}
       stdout length={{ argocd_generated_token.stdout | trim | length }}{{ (', stdout=' ~ (argocd_generated_token.stdout | trim)) if (argocd_generated_token.stdout | trim | length) <= 20 else '' }}
     quiet: true
 
