@@ -23,14 +23,20 @@
     stdin: "{{ vault_argocd_user_passwords[pair.0.account] }}"
   register: argocd_generated_token
   changed_when: true
+  failed_when: false   # judged below, where rc and stderr (never the token) can be shown
   no_log: true
 
 - name: Check that a token came back
   ansible.builtin.assert:
-    that: argocd_generated_token.stdout | trim | length > 20
-    fail_msg: "ArgoCD did not return a token for {{ pair.0.account }} (RBAC: the account must be allowed to update itself)."
+    that:
+      - argocd_generated_token.rc == 0
+      - argocd_generated_token.stdout | trim | length > 20
+    fail_msg: >-
+      ArgoCD did not return a token for {{ pair.0.account }} (rc={{ argocd_generated_token.rc }}).
+      Likely causes: the account lacks the apiKey capability, RBAC (accounts, update, {{ pair.0.account }}),
+      a wrong password in vault_argocd_user_passwords, or a wrong login flag. stderr of the CLI:
+      {{ argocd_generated_token.stderr | default('') | regex_replace('(?i)(token|password)[^\\n]*', '\\1 <hidden>') }}
     quiet: true
-  no_log: true
 
 - name: Create the namespace of the token Secret
   ansible.builtin.command:
