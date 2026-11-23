@@ -20,6 +20,23 @@ argocd_ingress_force_ssl_redirect: false
 argocd_users:
   - name: huponx
     role: admin
+  # Read-only account of gatekeeper: lists the applications for the system status card of the admin app.
+  # Needs a password in argocd_vault.yml (vault_argocd_user_passwords.gatekeeper, `make vault-edit`).
+  - name: gatekeeper
+    role: status-reader
+    apikey: true
+
+# Role of the account above: reads applications, and updates its own account (that is what creating its API token needs).
+argocd_rbac_extra_policy: |
+  p, role:status-reader, applications, get, */*, allow
+  p, role:status-reader, accounts, update, gatekeeper, allow
+
+# The token of that account, generated once into the Secret gatekeeper-argocd (mm-deploy gatekeeper.yaml reads it
+# as GATEKEEPER_ARGOCD_TOKEN). Deploy it with `make deploy TAGS=argocd`.
+argocd_api_tokens:
+  - account: gatekeeper
+    secret_name: gatekeeper-argocd
+    secret_namespace: application
 
 # Repositories, shared credentials and root applications. Credentials: argocd_vault.yml
 # (vault_argocd_repo_secrets). See README, "ArgoCD repositories and root applications".

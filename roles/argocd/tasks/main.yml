@@ -9,6 +9,10 @@
   include_tasks: users.yml
   when: argocd_users | length > 0
 
+- name: Generate API tokens of ArgoCD accounts
+  include_tasks: tokens.yml
+  when: argocd_api_tokens | length > 0
+
 - name: Configure ArgoCD repositories and root applications
   include_tasks: repositories.yml
   when: (argocd_repositories + argocd_repo_credentials + argocd_root_apps) | length > 0

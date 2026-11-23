@@ -1,0 +1,67 @@
+---
+# One token: sign in as the account inside argocd-server, generate the token, store it in the Secret.
+- name: Generate the API token of {{ pair.0.account }}
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - exec
+      - -i
+      - -n
+      - "{{ argocd_namespace }}"
+      - deploy/argocd-server
+      - --
+      - sh
+      - -c
+      - |
+        read -r PW
+        cfg=$(mktemp)
+        trap 'rm -f "$cfg"' EXIT
+        flags="--config $cfg --plaintext --grpc-web"
+        out=$(argocd login localhost:8080 $flags --username "{{ pair.0.account }}" --password "$PW" 2>&1); rc=$?
+        echo "step login: rc=$rc $(printf '%s' "$out" | tr '\n' ' ' | sed "s/$PW/***/g")" >&2
+        [ "$rc" -eq 0 ] || exit 1
+        echo "step whoami: $(argocd account get-user-info $flags 2>&1 | tr '\n' ' ')" >&2
+        tok=$(argocd account generate-token --account "{{ pair.0.account }}" $flags {{ ('--expires-in ' ~ pair.0.expires_in) if pair.0.expires_in | default('') | length > 0 else '' }} 2>/tmp/gen.err); rc=$?
+        echo "step generate-token: rc=$rc stdout_len=$(printf %s "$tok" | wc -c) stderr=$(tr '\n' ' ' </tmp/gen.err)" >&2
+        rm -f /tmp/gen.err
+        [ "$rc" -eq 0 ] && [ -n "$tok" ] || exit 1
+        printf '%s' "$tok"
+    stdin: "{{ vault_argocd_user_passwords[pair.0.account] }}"
+  register: argocd_generated_token
+  changed_when: true
+  failed_when: false   # judged below, where rc and stderr (never the token) can be shown
+  no_log: true
+
+- name: Check that a token came back
+  ansible.builtin.assert:
+    that:
+      - argocd_generated_token.rc == 0
+      - argocd_generated_token.stdout | trim | length > 20
+    fail_msg: >-
+      ArgoCD did not return a token for {{ pair.0.account }} (rc={{ argocd_generated_token.rc }}).
+      Likely causes: the account lacks the apiKey capability, RBAC (accounts, update, {{ pair.0.account }}),
+      a wrong password in vault_argocd_user_passwords, or a wrong login flag. stderr of the CLI:
+      {{ argocd_generated_token.stderr | default('') }}
+      stdout length={{ argocd_generated_token.stdout | trim | length }}{{ (', stdout=' ~ (argocd_generated_token.stdout | trim)) if (argocd_generated_token.stdout | trim | length) <= 20 else '' }}
+    quiet: true
+  when: not ansible_check_mode   # a dry run runs no command, so there is no token to check
+
+- name: Create the namespace of the token Secret
+  ansible.builtin.command:
+    argv: [microk8s, kubectl, apply, -f, "-"]
+    stdin: "{{ {'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': pair.0.secret_namespace}} | to_json }}"
+  register: argocd_token_ns
+  changed_when: "'created' in argocd_token_ns.stdout"
+
+# stdin, server side apply: the token is not in a command line or a last-applied annotation
+- name: Store the token in the Secret
+  ansible.builtin.command:
+    argv: [microk8s, kubectl, apply, --server-side, --force-conflicts, -f, "-"]
+    stdin: >-
+      {{ {'apiVersion': 'v1', 'kind': 'Secret',
+      'metadata': {'name': pair.0.secret_name, 'namespace': pair.0.secret_namespace},
+      'type': 'Opaque',
+      'stringData': {(pair.0.secret_key | default('token')): (argocd_generated_token.stdout | trim)}} | to_json }}
+  changed_when: true
+  no_log: true
