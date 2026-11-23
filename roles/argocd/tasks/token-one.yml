@@ -45,6 +45,7 @@
       {{ argocd_generated_token.stderr | default('') }}
       stdout length={{ argocd_generated_token.stdout | trim | length }}{{ (', stdout=' ~ (argocd_generated_token.stdout | trim)) if (argocd_generated_token.stdout | trim | length) <= 20 else '' }}
     quiet: true
+  when: not ansible_check_mode   # a dry run runs no command, so there is no token to check
 
 - name: Create the namespace of the token Secret
   ansible.builtin.command:
