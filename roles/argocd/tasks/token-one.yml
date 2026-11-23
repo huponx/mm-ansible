@@ -36,6 +36,7 @@
       Likely causes: the account lacks the apiKey capability, RBAC (accounts, update, {{ pair.0.account }}),
       a wrong password in vault_argocd_user_passwords, or a wrong login flag. stderr of the CLI:
       {{ argocd_generated_token.stderr | default('') | regex_replace('(?i)(token|password)[^\\n]*', '\\1 <hidden>') }}
+      stdout length={{ argocd_generated_token.stdout | trim | length }}{{ (', stdout=' ~ (argocd_generated_token.stdout | trim)) if (argocd_generated_token.stdout | trim | length) <= 20 else '' }}
     quiet: true
 
 - name: Create the namespace of the token Secret
