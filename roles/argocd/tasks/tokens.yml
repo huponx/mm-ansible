@@ -1,0 +1,43 @@
+---
+# API tokens of local ArgoCD accounts (argocd_api_tokens), kept in a Kubernetes Secret for the service that uses
+# them (the system status of gatekeeper reads the applications with one).
+#
+# The token is generated once: when the Secret already holds the key nothing is generated again, so a run never
+# invalidates a working token. `rotate: true` makes a new one (then remove the flag). The account signs in inside the
+# argocd-server pod (no ingress, no admin password needed) with its password from vault_argocd_user_passwords; the
+# password is read from stdin, so it is not on a command line. Token and password never reach the log (no_log).
+# The account needs `apikey: true` in argocd_users, and the RBAC to update itself (see argocd_rbac_extra_policy).
+
+- name: Validate the ArgoCD API tokens
+  ansible.builtin.assert:
+    that:
+      - argocd_api_tokens | map(attribute='account') | select('match', '^[a-z][a-z0-9_-]*$') | list | length == argocd_api_tokens | length
+      - argocd_api_tokens | map(attribute='secret_name') | select('match', '^[a-z0-9][a-z0-9.-]*$') | list | length == argocd_api_tokens | length
+      - argocd_api_tokens | map(attribute='secret_namespace') | select('match', '^[a-z0-9][a-z0-9-]*$') | list | length == argocd_api_tokens | length
+      - argocd_api_tokens | map(attribute='account') | reject('in', (argocd_users | selectattr('apikey', 'defined') | selectattr('apikey') | map(attribute='name') | list)) | list | length == 0
+      - argocd_api_tokens | map(attribute='account') | reject('in', (vault_argocd_user_passwords | default({})).keys() | list) | list | length == 0
+    fail_msg: >-
+      Invalid argocd_api_tokens: each entry needs account (an argocd_users entry with apikey: true and a password in
+      vault_argocd_user_passwords), secret_name and secret_namespace (lowercase).
+    quiet: true
+
+- name: Read the Secrets that hold the tokens
+  ansible.builtin.command: >-
+    microk8s kubectl get secret {{ item.secret_name }} -n {{ item.secret_namespace }}
+    -o jsonpath={.data.{{ item.secret_key | default('token') }}}
+  loop: "{{ argocd_api_tokens }}"
+  loop_control:
+    label: "{{ item.secret_namespace }}/{{ item.secret_name }}"
+  register: argocd_token_secrets
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Generate and store the missing tokens
+  ansible.builtin.include_tasks: token-one.yml
+  loop: "{{ argocd_api_tokens | zip(argocd_token_secrets.results) | list }}"
+  loop_control:
+    loop_var: pair
+    label: "{{ pair.0.account }} -> {{ pair.0.secret_namespace }}/{{ pair.0.secret_name }}"
+  when: (pair.1.stdout | default('') | length == 0) or (pair.0.rotate | default(false) | bool)

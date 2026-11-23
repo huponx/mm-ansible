@@ -1,0 +1,52 @@
+---
+# One token: sign in as the account inside argocd-server, generate the token, store it in the Secret.
+- name: Generate the API token of {{ pair.0.account }}
+  ansible.builtin.command:
+    argv:
+      - microk8s
+      - kubectl
+      - exec
+      - -i
+      - -n
+      - "{{ argocd_namespace }}"
+      - deploy/argocd-server
+      - --
+      - sh
+      - -c
+      - |
+        set -e
+        read -r PW
+        cfg=$(mktemp)
+        trap 'rm -f "$cfg"' EXIT
+        argocd login localhost:8080 --plaintext --grpc-web --config "$cfg" --username "{{ pair.0.account }}" --password "$PW" >/dev/null
+        argocd account generate-token --account "{{ pair.0.account }}" --config "$cfg" --plaintext --grpc-web {{ ('--expires-in ' ~ pair.0.expires_in) if pair.0.expires_in | default('') | length > 0 else '' }}
+    stdin: "{{ vault_argocd_user_passwords[pair.0.account] }}"
+  register: argocd_generated_token
+  changed_when: true
+  no_log: true
+
+- name: Check that a token came back
+  ansible.builtin.assert:
+    that: argocd_generated_token.stdout | trim | length > 20
+    fail_msg: "ArgoCD did not return a token for {{ pair.0.account }} (RBAC: the account must be allowed to update itself)."
+    quiet: true
+  no_log: true
+
+- name: Create the namespace of the token Secret
+  ansible.builtin.command:
+    argv: [microk8s, kubectl, apply, -f, "-"]
+    stdin: "{{ {'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': pair.0.secret_namespace}} | to_json }}"
+  register: argocd_token_ns
+  changed_when: "'created' in argocd_token_ns.stdout"
+
+# stdin, server side apply: the token is not in a command line or a last-applied annotation
+- name: Store the token in the Secret
+  ansible.builtin.command:
+    argv: [microk8s, kubectl, apply, --server-side, --force-conflicts, -f, "-"]
+    stdin: >-
+      {{ {'apiVersion': 'v1', 'kind': 'Secret',
+      'metadata': {'name': pair.0.secret_name, 'namespace': pair.0.secret_namespace},
+      'type': 'Opaque',
+      'stringData': {(pair.0.secret_key | default('token')): (argocd_generated_token.stdout | trim)}} | to_json }}
+  changed_when: true
+  no_log: true

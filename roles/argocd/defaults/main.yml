@@ -30,6 +30,16 @@ argocd_ingress_force_ssl_redirect: true
 #       state: absent             # removes the account and its password
 argocd_users: []
 
+# API tokens of accounts with `apikey: true`, generated once and stored in a Kubernetes Secret (tasks/tokens.yml):
+#   argocd_api_tokens:
+#     - account: gatekeeper          # an argocd_users entry with apikey: true, password in the vault
+#       secret_name: gatekeeper-argocd
+#       secret_namespace: application
+#       secret_key: token            # default
+#       expires_in: ""               # for example 8760h; empty = no expiry
+#       rotate: false                # true generates a new token and replaces the Secret, then remove the flag
+argocd_api_tokens: []
+
 # true = the vault is the only source of truth: a password changed in the ArgoCD UI is put back
 # to the vault value on the next run (which also signs that user out). false = only set the
 # password of an account that has none, or with rotate_password.

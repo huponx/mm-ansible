@@ -496,6 +496,29 @@ make deploy TAGS=argocd
 - `policy.csv` of `argocd-rbac-cm` is managed from `argocd_users` (`g, <user>, role:<role>` lines) plus `argocd_rbac_extra_policy`; manual edits to it are overwritten while `argocd_users` is not empty. `argocd_rbac_default_policy` (default `role:readonly`) applies to everyone else.
 - The `password_hash('bcrypt')` filter needs `passlib` and `bcrypt` on the machine that runs Ansible (in `requirements.txt`, so `make deps` installs them).
 
+#### ArgoCD API tokens
+
+An account with `apikey: true` can have an API token that a service uses (gatekeeper reads the applications with one for the system status card of the admin app). `argocd_api_tokens` generates it once and stores it in a Kubernetes Secret:
+
+```yaml
+argocd_users:
+  - { name: gatekeeper, role: status-reader, apikey: true }   # password: vault_argocd_user_passwords.gatekeeper
+argocd_rbac_extra_policy: |
+  p, role:status-reader, applications, get, */*, allow
+  p, role:status-reader, accounts, update, gatekeeper, allow     # an account creates its own token with this
+argocd_api_tokens:
+  - account: gatekeeper
+    secret_name: gatekeeper-argocd      # mm-deploy gatekeeper.yaml: GATEKEEPER_ARGOCD_TOKEN <- key token
+    secret_namespace: application
+    # secret_key: token                 # default
+    # expires_in: 8760h                 # default: no expiry
+    # rotate: true                      # new token, then remove the flag
+```
+
+- Run `make deploy TAGS=argocd`. (The ingress setup runs ArgoCD with `server.insecure`, so the CLI in the pod uses `--plaintext`.) The account signs in inside the `argocd-server` pod (no ingress, no admin password), so the only secret needed is its password in the vault. The password is read from stdin and the token is applied from stdin (server side), so neither shows in a command line, a log or an annotation.
+- Idempotent: when the Secret already holds the key, nothing is generated, so a run never breaks a working token. `rotate: true` replaces it (restart of gatekeeper follows by itself, Reloader watches the Secret).
+- The role only reads applications. If the account cannot create its token, check the `accounts, update` line (policy syntax of the ArgoCD version in `argocd_version`).
+
 ### ArgoCD repositories and root applications
 
 ArgoCD reads a Git repository from a Secret in the `argocd` namespace. The role creates them from
