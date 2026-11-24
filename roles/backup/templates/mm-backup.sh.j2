@@ -17,4 +17,7 @@ export REDISCLI_AUTH="$(awk '/^requirepass /{print $2}' /etc/redis/redis.conf)"
 redis-cli -p {{ redis_port | default(6379) }} SAVE >/dev/null
 cp /var/lib/redis/dump.rdb "$dir/redis-$stamp.rdb"
 {% endif %}
+{% if backup_pvc_enabled %}
+tar -czf "$dir/{{ backup_pvc_name }}-$stamp.tar.gz" -C "{{ backup_pvc_path }}" .
+{% endif %}
 find "$dir" -type f -mtime +{{ backup_keep_days }} -delete

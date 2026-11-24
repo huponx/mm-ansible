@@ -1,6 +1,15 @@
-pvc_name: application-pvc
-pvc_namespace: application
-pvc_access_modes:
+# Each entry: name, namespace, storage, storage_class, access_modes (all but name are optional and fall back to
+# the pvc_default_* values). application-pvc is kept as it was; dictionary-images is the image store of the
+# dictionary service (DICTIONARY_IMAGE_DIR, mounted by its chart). The claims live outside ArgoCD, so pruning or
+# deleting an Application never touches the data. ReadWriteOnce on hostpath works because the cluster has one node:
+# with more nodes switch to a ReadWriteMany class or object storage.
+application_pvcs:
+  - name: application-pvc
+  - name: dictionary-images
+    storage: 5Gi
+
+pvc_default_namespace: application
+pvc_default_access_modes:
   - ReadWriteOnce
-pvc_storage: 1Gi
-pvc_storage_class: microk8s-hostpath
+pvc_default_storage: 1Gi
+pvc_default_storage_class: microk8s-hostpath
