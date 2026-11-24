@@ -1,21 +1,22 @@
 ---
-- name: Ensure pvc namespace exists
+- name: Ensure pvc namespaces exist
   ansible.builtin.shell: >-
     set -o pipefail;
-    microk8s kubectl create namespace "{{ pvc_namespace }}" --dry-run=client -o yaml
+    microk8s kubectl create namespace "{{ item }}" --dry-run=client -o yaml
     | microk8s kubectl apply -f -
   args:
     executable: /bin/bash
+  loop: "{{ application_pvcs | map(attribute='namespace', default=pvc_default_namespace) | unique | list }}"
   register: ns_apply
   changed_when: "'created' in ns_apply.stdout"
 
 - name: Render PVC manifest
   ansible.builtin.template:
     src: pvc.yaml.j2
-    dest: "/tmp/{{ pvc_name }}-pvc.yaml"
+    dest: /tmp/application-pvcs.yaml
     mode: "0644"
 
-- name: Apply PVC
-  ansible.builtin.command: "microk8s kubectl apply -f /tmp/{{ pvc_name }}-pvc.yaml"
+- name: Apply PVCs
+  ansible.builtin.command: "microk8s kubectl apply -f /tmp/application-pvcs.yaml"
   register: pvc_apply
   changed_when: "'unchanged' not in pvc_apply.stdout"

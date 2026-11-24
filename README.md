@@ -847,14 +847,15 @@ an empty list removes the block. Re-enabling the MicroK8s `dns` add-on resets th
 | `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `coredns` | Static host names in the CoreDNS Corefile (for example the external PostgreSQL and Redis behind the mm-deploy `ExternalName` Services), then a CoreDNS restart | `coredns_hosts` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
-| `application-pvc` | PersistentVolumeClaim for applications | `pvc_name`, `pvc_namespace`, `pvc_storage`, `pvc_storage_class` |
+| `application-pvc` | PersistentVolumeClaims for applications: the list `application_pvcs` (`application-pvc` 1Gi and `dictionary-images` 5Gi, the image store the dictionary chart mounts). They live outside ArgoCD, so deleting an Application keeps the data; run tag `pvc` before the first deploy, or the pod stays `Pending`. ReadWriteOnce hostpath only works on a one-node cluster | `application_pvcs` (`name`, `namespace`, `storage`, `storage_class`, `access_modes`) |
 | `k8s-secrets` | Create, replace, merge-patch and delete Kubernetes Secrets | `k8s_secrets`, `vault_k8s_secrets` |
 | `vault` | HashiCorp Vault and External Secrets Operator. Off unless `vault_enabled: true` | `vault_ingress_host`, `vault_dev_mode`, `eso_chart_version` |
 | `common` | Optional: unattended upgrades, fail2ban, UFW. Off unless `common_enabled: true` | `common_ufw_enabled`, `common_ufw_rules` |
-| `backup` | Optional: daily PostgreSQL dumps and Redis RDB copy via a systemd timer. Off unless `backup_enabled: true` | `backup_dir`, `backup_keep_days`, `backup_schedule` |
+| `backup` | Optional: daily PostgreSQL dumps and Redis RDB copy via a systemd timer. Off unless `backup_enabled: true` | `backup_dir`, `backup_keep_days`, `backup_schedule`, `backup_pvc_enabled`, `backup_pvc_path` |
 
 Before enabling the firewall (`common_ufw_enabled: true`) make sure the SSH port and the cluster ports you use are in `common_ufw_rules`.
 Backups are stored on the same server: copy `backup_dir` somewhere else for real disaster recovery.
+With `backup_pvc_enabled: true` and `backup_pvc_path` (the hostpath directory of the `dictionary-images` PV) the script also writes `dictionary-images-<stamp>.tar.gz`; the same `backup_keep_days` applies.
 Restore a database with `pg_restore -d data --clean /var/backups/mm/postgres-data-<stamp>.dump`.
 
 ## Troubleshooting

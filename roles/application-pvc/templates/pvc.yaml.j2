@@ -1,14 +1,17 @@
+{% for pvc in application_pvcs %}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ pvc_name }}
-  namespace: {{ pvc_namespace }}
+  name: {{ pvc.name }}
+  namespace: {{ pvc.namespace | default(pvc_default_namespace) }}
 spec:
   accessModes:
-{% for mode in pvc_access_modes %}
+{% for mode in pvc.access_modes | default(pvc_default_access_modes) %}
     - {{ mode }}
 {% endfor %}
   resources:
     requests:
-      storage: {{ pvc_storage }}
-  storageClassName: {{ pvc_storage_class }}
+      storage: {{ pvc.storage | default(pvc_default_storage) }}
+  storageClassName: {{ pvc.storage_class | default(pvc_default_storage_class) }}
+---
+{% endfor %}
