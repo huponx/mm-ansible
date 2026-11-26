@@ -20,3 +20,12 @@
   ansible.builtin.command: "microk8s kubectl apply -f /tmp/application-pvcs.yaml"
   register: pvc_apply
   changed_when: "'unchanged' not in pvc_apply.stdout"
+
+- name: Delete PVCs that are no longer used
+  ansible.builtin.command: >-
+    microk8s kubectl delete pvc {{ (item.split('/')[-1]) }}
+    -n {{ item.split('/')[0] if '/' in item else pvc_default_namespace }}
+    --ignore-not-found --wait=false
+  loop: "{{ application_pvcs_absent }}"
+  register: pvc_delete
+  changed_when: "'deleted' in pvc_delete.stdout"

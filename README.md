@@ -847,7 +847,7 @@ an empty list removes the block. Re-enabling the MicroK8s `dns` add-on resets th
 | `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `coredns` | Static host names in the CoreDNS Corefile (for example the external PostgreSQL and Redis behind the mm-deploy `ExternalName` Services), then a CoreDNS restart | `coredns_hosts` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |
-| `application-pvc` | PersistentVolumeClaims for applications: the list `application_pvcs` (`application-pvc` 1Gi and `dictionary-images` 5Gi, the image store the dictionary chart mounts). They live outside ArgoCD, so deleting an Application keeps the data; run tag `pvc` before the first deploy, or the pod stays `Pending`. ReadWriteOnce hostpath only works on a one-node cluster | `application_pvcs` (`name`, `namespace`, `storage`, `storage_class`, `access_modes`) |
+| `application-pvc` | PersistentVolumeClaims for applications: the list `application_pvcs` (`application-pvc` 1Gi and `dictionary-files` 5Gi, the image and audio store the dictionary chart mounts). They live outside ArgoCD, so deleting an Application keeps the data; run tag `pvc` before the first deploy, or the pod stays `Pending`. ReadWriteOnce hostpath only works on a one-node cluster | `application_pvcs` (`name`, `namespace`, `storage`, `storage_class`, `access_modes`), `application_pvcs_absent` (names to delete) |
 | `k8s-secrets` | Create, replace, merge-patch and delete Kubernetes Secrets | `k8s_secrets`, `vault_k8s_secrets` |
 | `vault` | HashiCorp Vault and External Secrets Operator. Off unless `vault_enabled: true` | `vault_ingress_host`, `vault_dev_mode`, `eso_chart_version` |
 | `common` | Optional: unattended upgrades, fail2ban, UFW. Off unless `common_enabled: true` | `common_ufw_enabled`, `common_ufw_rules` |
@@ -855,7 +855,8 @@ an empty list removes the block. Re-enabling the MicroK8s `dns` add-on resets th
 
 Before enabling the firewall (`common_ufw_enabled: true`) make sure the SSH port and the cluster ports you use are in `common_ufw_rules`.
 Backups are stored on the same server: copy `backup_dir` somewhere else for real disaster recovery.
-With `backup_pvc_enabled: true` and `backup_pvc_path` (the hostpath directory of the `dictionary-images` PV) the script also writes `dictionary-images-<stamp>.tar.gz`; the same `backup_keep_days` applies.
+With `backup_pvc_enabled: true` and `backup_pvc_path` (the hostpath directory of the `dictionary-files` PV) the script also writes `dictionary-files-<stamp>.tar.gz`; the same `backup_keep_days` applies.
+Replacing a PVC (for example `dictionary-images` by `dictionary-files`): the name of a claim cannot change, so create the new one and delete the old one in this order. (1) Run `--tags pvc` with the new claim in `application_pvcs`. (2) Deploy the chart that mounts it and check that the pods run. (3) Set `application_pvcs_absent: [dictionary-images]` (or `<namespace>/<name>`; the default namespace is `pvc_default_namespace`) and run `--tags pvc` again: it runs `kubectl delete pvc --ignore-not-found` for the names listed and nothing else. A claim a pod still mounts stays `Terminating` until the pod is gone, so do it after the rollout. With the `Delete` reclaim policy of `microk8s-hostpath` the PV and its directory are deleted with the claim (check with `microk8s kubectl get sc microk8s-hostpath -o jsonpath='{.reclaimPolicy}'`; with `Retain` delete the PV and the directory by hand). (4) Empty `application_pvcs_absent` again.
 Restore a database with `pg_restore -d data --clean /var/backups/mm/postgres-data-<stamp>.dump`.
 
 ## Troubleshooting
