@@ -10,8 +10,8 @@ backup_schedule: "*-*-* 03:00:00"
 backup_postgres: true
 backup_redis: true
 
-# Copy of the hostpath directory behind a PVC (the dictionary images), as a tar.gz. Off by default. The directory
+# Copy of the hostpath directory behind a PVC (the dictionary images and audio), as a tar.gz. Off by default. The directory
 # is the PV of the claim: find it with `microk8s kubectl get pv -o wide` (hostpath: /var/snap/microk8s/common/default-storage/<ns>-<claim>-<pv>).
 backup_pvc_enabled: false
 backup_pvc_path: ""
-backup_pvc_name: dictionary-images
+backup_pvc_name: dictionary-files
