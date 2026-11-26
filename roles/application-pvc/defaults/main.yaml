@@ -13,7 +13,7 @@ application_pvcs:
 # the chart that stopped using it has rolled out: a claim a pod still mounts stays `Terminating` (finalizer
 # pvc-protection). With the reclaim policy `Delete` (microk8s-hostpath) the PV and its directory go with it.
 # Example, after the move from dictionary-images to dictionary-files: application_pvcs_absent: [dictionary-images]
-application_pvcs_absent: [dictionary-images]
+application_pvcs_absent: []
 
 pvc_default_namespace: application
 pvc_default_access_modes:
