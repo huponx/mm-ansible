@@ -1,0 +1,4 @@
+---
+# PVC claims to delete once (tag `pvc`). Add names, deploy; the cleanup pull request sets the list back to [].
+# See the role application-pvc and the README (Replacing a PVC). Example: application_pvcs_absent: [dictionary-images]
+application_pvcs_absent: []

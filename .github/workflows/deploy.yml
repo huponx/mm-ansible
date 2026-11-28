@@ -48,6 +48,14 @@ jobs:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
         run: |
+          # The merged cleanup pull request only removes options that the last deploy already applied
+          # (title set in job cleanup-pr, kept by a squash or merge commit): nothing to deploy.
+          subject=$(git log -1 --format=%s "$GITHUB_SHA")
+          if [ "$EVENT" = "push" ] && [[ "$subject" == "chore(ansible): remove one-shot options after deploy"* ]]; then
+            printf 'mode=none\ntags=\n' >> "$GITHUB_OUTPUT"
+            cat "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT" != "push" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             printf 'mode=all\ntags=\n' >> "$GITHUB_OUTPUT"

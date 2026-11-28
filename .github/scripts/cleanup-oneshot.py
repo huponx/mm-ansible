@@ -6,6 +6,7 @@ Some options only have to be set for one run and must be removed afterwards:
   group A  rotate_password, recreate, force, keys_absent, revoke_roles (keys of a list item)
            postgres_rotate_passwords, postgres_allow_drop_databases (top level, set back to false)
   group B  whole list items with `state: absent` (they have been applied)
+           application_pvcs_absent (top level list, set back to [])
 
 The files are edited as text, line by line, so comments and formatting stay exactly as they are
 (ruamel.yaml is only used to find where each item starts). The vault files are never opened.
@@ -35,6 +36,7 @@ TAG_FILES = {
     "postgres": "postgres.yml",
     "secrets": "k8s_secrets.yml",
     "argocd": "argocd.yml",
+    "pvc": "pvc.yml",
 }
 
 TRUE_VALUES = {"true", "yes", "on"}
@@ -43,6 +45,8 @@ FLAG_KEYS = ("rotate_password", "recreate", "force")
 LIST_KEYS = ("keys_absent", "revoke_roles")
 # Top-level booleans that are put back to false.
 RESET_VARS = ("postgres_rotate_passwords", "postgres_allow_drop_databases")
+# Top-level lists of names to delete once: emptied (`key: []`) after the deploy.
+CLEAR_LISTS = ("application_pvcs_absent",)
 
 
 def is_true(value) -> bool:
@@ -139,6 +143,13 @@ def process_file(path: Path, log_failed: set[str], report: Edit) -> None:
             lines[key_line] = re.sub(r"(:\s*)(true|yes|on)\b", r"\1false", lines_before, count=1, flags=re.I)
             edit.replace[key_line] = lines[key_line]
             edit.removed.append(f"`{name}`: `{key}` set back to `false`")
+            continue
+
+        if key in CLEAR_LISTS and isinstance(value, list) and value:
+            first, end = key_span(lines, key_line)
+            edit.replace[first] = f"{key}: []"
+            edit.delete.update(range(first + 1, end))
+            edit.removed.append(f"`{name}`: `{key}` emptied (was {', '.join(str(v) for v in value)})")
             continue
 
         if not isinstance(value, list) or not all(hasattr(i, "items") for i in value):
