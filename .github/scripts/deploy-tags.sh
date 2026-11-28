@@ -34,6 +34,7 @@ while IFS= read -r f; do
     inventories/production/group_vars/all/k8s_secrets*.yml) add_tag secrets ;;
     inventories/production/group_vars/all/microk8s*.yml) add_tag microk8s ;;
     inventories/production/group_vars/all/postgres*.yml) add_tag postgres ;;
+    inventories/production/group_vars/all/pvc*.yml) add_tag pvc ;;
     inventories/production/group_vars/all/redis*.yml) add_tag redis ;;
     inventories/production/group_vars/all/vault.yml) add_tag vault ;;
     # playbooks/, hosts.ini, other group_vars, ansible.cfg, requirements.yml, new roles...

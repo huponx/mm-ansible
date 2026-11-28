@@ -1,0 +1,5 @@
+---
+# PVC claims to delete once.
+application_pvcs_absent:
+  - dictionary-images
+  - other/old-claim
