@@ -861,7 +861,7 @@ an empty list removes the block. Re-enabling the MicroK8s `dns` add-on resets th
 
 | Role | Purpose | Main variables |
 |---|---|---|
-| `microk8s` | Install MicroK8s, enable the add-ons in `microk8s_addons`, cert-manager issuer | `microk8s_version`, `metallb_ip_range`, `microk8s_addons`, `acme_email`, `cluster_issuer_name` |
+| `microk8s` | Install MicroK8s, enable the add-ons in `microk8s_addons`, cert-manager issuers: the ACME `ClusterIssuer` for public hosts and the internal CA (`internal-ca`: selfSigned → CA `Certificate` in `cert-manager` → `ClusterIssuer` of type `ca`) that signs the in-cluster gRPC certificates | `microk8s_version`, `metallb_ip_range`, `microk8s_addons`, `acme_email`, `cluster_issuer_name`, `internal_issuer_name` |
 | `argocd` | Install ArgoCD (pinned manifest), its ingress, optional local users (`argocd_users`), repositories and root applications | `argocd_version`, `argocd_ingress_host`, `argocd_external_url` |
 | `coredns` | Static host names in the CoreDNS Corefile (for example the external PostgreSQL and Redis behind the mm-deploy `ExternalName` Services), then a CoreDNS restart | `coredns_hosts` |
 | `reloader` | Stakater Reloader (Helm) | `reloader_chart_version` |

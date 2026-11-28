@@ -21,3 +21,8 @@ microk8s_addons:
   - name: helm3
   - name: cert-manager
     wait: { kind: deployment, selector: "--all", namespace: cert-manager, condition: available }
+
+# Internal CA (cert-manager) that signs the certificates of the in-cluster gRPC servers
+internal_issuer_name: "internal-ca"
+internal_ca_duration: "87600h"      # 10 years; clients trust this CA, so rotating it means redeploying the trust
+internal_ca_renew_before: "720h"

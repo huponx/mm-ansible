@@ -1,0 +1,35 @@
+# Internal CA of the cluster: signs the certificates of the in-cluster gRPC servers (names under .svc, which the ACME
+# issuer cannot sign). selfSigned issuer -> CA certificate -> ClusterIssuer of type ca.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ internal_issuer_name }}-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ internal_issuer_name }}
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: {{ internal_issuer_name }}
+  duration: {{ internal_ca_duration }}
+  renewBefore: {{ internal_ca_renew_before }}
+  secretName: {{ internal_issuer_name }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ internal_issuer_name }}-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ internal_issuer_name }}
+spec:
+  ca:
+    secretName: {{ internal_issuer_name }}

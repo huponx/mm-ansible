@@ -13,3 +13,19 @@
   delay: 10
   until: cluster_issuer_apply.rc == 0
   changed_when: "'unchanged' not in cluster_issuer_apply.stdout"
+
+# Internal CA for the in-cluster gRPC TLS (once per cluster). The Certificates of the servers are in mm-deploy
+# infra-services/<env>/certificates and reference the ClusterIssuer `internal_issuer_name`.
+- name: Create internal CA yaml from template
+  ansible.builtin.template:
+    src: internal-ca.yaml.j2
+    dest: /tmp/internal-ca.yaml
+    mode: "0644"
+
+- name: Apply internal CA
+  ansible.builtin.command: microk8s kubectl apply -f /tmp/internal-ca.yaml
+  register: internal_ca_apply
+  retries: 6
+  delay: 10
+  until: internal_ca_apply.rc == 0
+  changed_when: "'unchanged' not in internal_ca_apply.stdout"
