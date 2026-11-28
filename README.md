@@ -796,6 +796,16 @@ make vault-edit F=k8s_secrets_vault.yml    # paste under vault_k8s_secrets:, sav
 make deploy TAGS=secrets                   # or merge to main
 ```
 
+The vault only holds the **values**. Each Secret must also be **listed** in `k8s_secrets.yml`, or the role never creates it (a Secret that is not listed is not touched). Check that the entries for the new ones exist (`secret:` is left out because the default `<namespace>-<name>` is already the vault key):
+
+```yaml
+# k8s_secrets.yml
+  - name: courier-client
+    namespace: application
+  - name: courier-vapid
+    namespace: application
+```
+
 `scripts/gen-identity-secrets.sh` writes nothing to disk. The vault block looks like this (the PEM is a block scalar):
 
 ```yaml
